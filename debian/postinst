@@ -5,6 +5,7 @@
 
 set -e
 
+# shellcheck source=/dev/null
 . /usr/share/debconf/confmodule
 
 CONFDIR=/etc/fips-initramfs
@@ -151,7 +152,7 @@ case "$1" in
         chmod 0600 "$KEYFILE"
         # Guarded so a missing public key does not abort the script
         # under "set -e".
-        [ -f "$PUBFILE" ] && chmod 0644 "$PUBFILE" || true
+        if [ -f "$PUBFILE" ]; then chmod 0644 "$PUBFILE"; fi
 
         authorise_key
 

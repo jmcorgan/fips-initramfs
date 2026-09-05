@@ -29,9 +29,13 @@ pass=0
 fail=0
 ok()   { pass=$((pass + 1)); echo "ok   $1"; }
 bad()  { fail=$((fail + 1)); echo "FAIL $1"; }
-check() { if [ "$1" = 0 ]; then ok "$2"; else bad "$2"; fi; }
+# Takes the description first and then the command to run, rather than a
+# $? from the line above: that form is fragile, and any command between
+# the condition and the check silently changes the answer.
+check() { _desc=$1; shift; if "$@"; then ok "$_desc"; else bad "$_desc"; fi; }
 section() { echo; echo "== $1"; }
 
+# shellcheck source=/dev/null
 distro=$(. /etc/os-release && echo "$PRETTY_NAME")
 echo "== $distro"
 
@@ -96,8 +100,18 @@ else
     tail -30 "$WORK/build.log"
     exit 1
 fi
-deb=$(ls ../fips-initramfs_*.deb 2>/dev/null | head -1)
-[ -n "$deb" ] && ok "a .deb was produced: $(basename "$deb")" || { bad "a .deb was produced"; exit 1; }
+deb=""
+for candidate in ../fips-initramfs_*.deb; do
+    [ -f "$candidate" ] || continue
+    deb="$candidate"
+    break
+done
+if [ -n "$deb" ]; then
+    ok "a .deb was produced: $(basename "$deb")"
+else
+    bad "a .deb was produced"
+    exit 1
+fi
 
 fipsver=$(cat usr/share/fips-initramfs/fips-version 2>/dev/null \
     || cat debian/fips-initramfs/usr/share/fips-initramfs/fips-version 2>/dev/null || echo unknown)
@@ -107,8 +121,12 @@ echo "     bundled FIPS version: $fipsver"
 # because the package ships files under /usr/share/initramfs-tools. A
 # container has no image for it to act on, so assert it is declared
 # rather than watching it fire.
-dpkg-deb --ctrl-tarfile "$deb" | tar -xO ./triggers 2>/dev/null | grep -q 'update-initramfs'
-check $? "the package declares an update-initramfs trigger"
+if dpkg-deb --ctrl-tarfile "$deb" | tar -xO ./triggers 2>/dev/null \
+        | grep -q 'update-initramfs'; then
+    ok "the package declares an update-initramfs trigger"
+else
+    bad "the package declares an update-initramfs trigger"
+fi
 
 ssh-keygen -q -t ed25519 -N '' -C ci@container -f "$WORK/id" </dev/null
 pubkey=$(cat "$WORK/id.pub")
@@ -138,14 +156,12 @@ inspect_image() {
 
     for want in usr/bin/fips etc/fips/fips.yaml etc/fips/fips.key etc/fips/mesh-address \
                 scripts/init-premount/a_fips scripts/init-bottom/fips-initramfs; do
-        [ -n "$(find_in_image "$want")" ]
-        check $? "$label: image carries $want"
+        check "$label: image carries $want" [ -n "$(find_in_image "$want")" ]
     done
 
     key=$(find_in_image etc/fips/fips.key)
     if [ -n "$key" ]; then
-        [ "$(stat -c%a "$key")" = 600 ]
-        check $? "$label: the identity key in the image is 0600"
+        check "$label: the identity key in the image is 0600" [ "$(stat -c%a "$key")" = 600 ]
     fi
 
     # The address the hook wrote must be the address the installed
@@ -156,8 +172,7 @@ inspect_image() {
         fipsctl=$(command -v fipsctl || echo /usr/lib/fips-initramfs/bin/fipsctl)
         expected=$("$fipsctl" address --key /etc/fips-initramfs/fips.pub 2>/dev/null || echo "")
         if [ -n "$expected" ]; then
-            [ "$(cat "$addr_file")" = "$expected" ]
-            check $? "$label: the address in the image matches the installed identity"
+            check "$label: the address in the image matches the installed identity" [ "$(cat "$addr_file")" = "$expected" ]
         else
             bad "$label: fipsctl could not derive the address to compare against"
         fi
@@ -165,8 +180,7 @@ inspect_image() {
 
     conf=$(find_in_image etc/dropbear/dropbear.conf)
     if [ -n "$conf" ]; then
-        grep -q 'DROPBEAR_OPTIONS.*-p \[' "$conf"
-        check $? "$label: dropbear is bound to the node's address"
+        check "$label: dropbear is bound to the node's address" grep -q 'DROPBEAR_OPTIONS.*-p \[' "$conf"
     else
         bad "$label: image carries etc/dropbear/dropbear.conf"
     fi
@@ -178,8 +192,7 @@ inspect_image() {
     # assume. Observed on Debian 13: home was /root-CK50YWeowv.
     keys=$(find "$WORK/x" -path '*/.ssh/authorized_keys' 2>/dev/null | head -1)
     if [ -n "$keys" ]; then
-        grep -q '^command="[^"]*cryptroot-unlock"' "$keys"
-        check $? "$label: the unlock key is forced to cryptroot-unlock"
+        check "$label: the unlock key is forced to cryptroot-unlock" grep -q '^command="[^"]*cryptroot-unlock"' "$keys"
     else
         bad "$label: image carries root's authorized_keys"
     fi
@@ -193,8 +206,7 @@ inspect_image() {
         [ -n "$(find_in_image "bin/$cmd")" ] || [ -n "$(find_in_image "sbin/$cmd")" ] \
             || missing="$missing $cmd"
     done
-    [ -z "$missing" ]
-    check $? "$label: every command the boot scripts call is in the image${missing:+ (missing:$missing)}"
+    check "$label: every command the boot scripts call is in the image${missing:+ (missing:$missing)}" [ -z "$missing" ]
 }
 
 section "install with no peer given: the shipped defaults are kept"
@@ -206,16 +218,15 @@ if apt-get install -y -qq "$deb" > "$WORK/install1.log" 2>&1; then
 else
     bad "default install succeeds"; tail -20 "$WORK/install1.log"
 fi
-[ -f /etc/fips-initramfs/fips.yaml ]; check $? "default install created the configuration"
-[ -f /etc/fips-initramfs/fips.key ]; check $? "default install generated an identity"
-grep -q 'npub1' /etc/fips-initramfs/fips.yaml; check $? "default install kept the shipped peers"
-grep -q "$(printf '%s' "$pubkey" | awk '{print $2}')" /etc/dropbear/initramfs/authorized_keys
-check $? "default install authorised the given key"
+check "default install created the configuration" [ -f /etc/fips-initramfs/fips.yaml ]
+check "default install generated an identity" [ -f /etc/fips-initramfs/fips.key ]
+check "default install kept the shipped peers" grep -q 'npub1' /etc/fips-initramfs/fips.yaml
+check "default install authorised the given key" grep -q "$(printf '%s' "$pubkey" | awk '{print $2}')" /etc/dropbear/initramfs/authorized_keys
 inspect_image "default"
 
 section "install with a peer given: the answer replaces the defaults"
 apt-get purge -y -qq fips-initramfs > "$WORK/purge.log" 2>&1
-[ ! -e /etc/fips-initramfs/fips.yaml ]; check $? "purge removed the configuration"
+check "purge removed the configuration" [ ! -e /etc/fips-initramfs/fips.yaml ]
 peer_npub=npub1qmc3cvfz0yu2hx96nq3gp55zdan2qclealn7xshgr448d3nh6lks7zel98
 {
   printf 'fips-initramfs fips-initramfs/peer-npub string %s\n' "$peer_npub"
@@ -227,10 +238,8 @@ if apt-get install -y -qq "$deb" > "$WORK/install2.log" 2>&1; then
 else
     bad "install with a peer succeeds"; tail -20 "$WORK/install2.log"
 fi
-grep -q '198.51.100.7:2121' /etc/fips-initramfs/fips.yaml
-check $? "the given peer address is in the configuration"
-[ "$(grep -c 'npub:' /etc/fips-initramfs/fips.yaml)" = 1 ]
-check $? "the given peer replaced the shipped ones rather than joining them"
+check "the given peer address is in the configuration" grep -q '198.51.100.7:2121' /etc/fips-initramfs/fips.yaml
+check "the given peer replaced the shipped ones rather than joining them" [ "$(grep -c 'npub:' /etc/fips-initramfs/fips.yaml)" = 1 ]
 inspect_image "peer"
 
 section "test suites"
@@ -239,7 +248,7 @@ section "test suites"
 # rather than letting it opt out.
 FIPSCTL=$(command -v fipsctl || echo /usr/lib/fips-initramfs/bin/fipsctl)
 export FIPSCTL
-[ -x "$FIPSCTL" ]; check $? "a fipsctl is available to the suites: $FIPSCTL"
+check "a fipsctl is available to the suites: $FIPSCTL" [ -x "$FIPSCTL" ]
 for t in hook-test functions-test premount-test; do
     if sh "tests/$t.sh" > "$WORK/$t.log" 2>&1; then
         ok "tests/$t.sh"

@@ -20,6 +20,8 @@ case "$1" in
     ;;
 esac
 
+# Provided inside the initramfs at boot; not present to be read here.
+# shellcheck source=/dev/null
 . /scripts/functions
 
 CONFIG=/etc/fips/fips.yaml

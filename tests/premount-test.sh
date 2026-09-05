@@ -40,6 +40,9 @@ assert() {
 # The whole PATH the function is allowed. sed is here because the image
 # carries it on every distribution checked; head is absent on purpose.
 mkdir -p "$WORK/bin"
+# One tool today. It stays a loop because the list is the point: what the
+# function is allowed to reach is meant to be read and extended here.
+# shellcheck disable=SC2043
 for tool in sed; do
     ln -s "$(command -v "$tool")" "$WORK/bin/$tool" || exit 1
 done

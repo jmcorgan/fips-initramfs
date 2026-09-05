@@ -1,5 +1,8 @@
+# shellcheck shell=sh
+#
 # Shared by the maintainer scripts and the initramfs hook. Sourced, not
-# executed.
+# executed. The directive above tells shellcheck which shell to check
+# against, since a sourced fragment carries no shebang to infer it from.
 #
 # This file decides which pair of binaries the package uses:
 #

@@ -225,6 +225,7 @@ assert "dropbear binds the address" "no matching DROPBEAR_OPTIONS line" \
 # replacing it. Sourcing the file is what dropbear's boot script does.
 # Both halves are asserted: checking only for the pre-existing option
 # would pass when the hook appended nothing at all.
+# shellcheck source=/dev/null
 opts=$(DROPBEAR_OPTIONS="-I 300"; . "$dest/etc/dropbear/dropbear.conf"; echo "$DROPBEAR_OPTIONS")
 assert "dropbear options compose" "sourced to '$opts'" \
     "$(printf '%s' "$opts" | grep -q -- '-I 300' \

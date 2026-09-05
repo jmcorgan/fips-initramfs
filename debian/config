@@ -6,6 +6,7 @@
 
 set -e
 
+# shellcheck source=/dev/null
 . /usr/share/debconf/confmodule
 
 CONFFILE=/etc/fips-initramfs/fips.yaml

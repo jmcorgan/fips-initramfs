@@ -31,6 +31,8 @@ case "$1" in
     ;;
 esac
 
+# Provided by initramfs-tools at build time; not present to be read here.
+# shellcheck source=/dev/null
 . /usr/share/initramfs-tools/hook-functions
 
 # Overridable so the hook can be exercised outside a real image build.
