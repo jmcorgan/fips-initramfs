@@ -1,0 +1,55 @@
+#!/usr/bin/make -f
+
+FIPS_ARCH := $(shell dpkg-architecture -qDEB_HOST_ARCH)
+BUNDLED_BIN = debian/fips-initramfs/usr/lib/fips-initramfs/bin
+
+%:
+	dh $@
+
+# The package carries fips and fipsctl, so a machine unlocks over the
+# mesh with nothing installed but this package and nothing done by hand.
+#
+# They are taken from a published FIPS release rather than built here.
+# The node in the initramfs is then the same build people run as the
+# daemon, and this package needs no Rust toolchain. debian/fetch-fips-deb.sh
+# downloads the release and checks it against the checksums that release
+# publishes; FIPS_DEB names a local file instead, for an offline build.
+#
+# A machine that also has the fips package installed uses /usr/bin, which
+# the resolver in lib/functions searches first. These copies are the
+# fallback for a machine that has no fips package at all.
+override_dh_auto_install:
+	debian/fetch-fips-deb.sh $(FIPS_ARCH)
+	install -d $(BUNDLED_BIN) debian/fips-initramfs/usr/share/fips-initramfs
+	set -eu; \
+	version=$$(cat vendor/fips-version); \
+	deb=vendor/fips_$${version}_$(FIPS_ARCH).deb; \
+	for b in fips fipsctl; do \
+	    dpkg-deb --fsys-tarfile $$deb | tar -xO ./usr/bin/$$b > $(BUNDLED_BIN)/$$b; \
+	    test -s $(BUNDLED_BIN)/$$b || { echo "$$b is not in $$deb" >&2; exit 1; }; \
+	    chmod 0755 $(BUNDLED_BIN)/$$b; \
+	done; \
+	$(BUNDLED_BIN)/fipsctl --version >/dev/null; \
+	printf '%s\n' "$$version" \
+	    > debian/fips-initramfs/usr/share/fips-initramfs/fips-version
+
+# The two binaries are another package's build product, and the point of
+# taking them from a release is that they are the same bytes. Stripping
+# or rewriting them here would break that.
+override_dh_strip:
+override_dh_dwz:
+
+# There is deliberately no debian/triggers. dh_installinitramfs sees the
+# files this package ships under /usr/share/initramfs-tools and adds
+# "activate-noawait update-initramfs" itself; declaring it again produces
+# the same line twice in the built package.
+
+# The initramfs hook and boot scripts must stay executable, and the
+# staging directory must stay private: it holds the node's secret key.
+override_dh_fixperms:
+	dh_fixperms -Xetc/fips-initramfs
+	chmod 0755 debian/fips-initramfs/usr/share/initramfs-tools/hooks/fips-initramfs
+	chmod 0755 debian/fips-initramfs/usr/share/initramfs-tools/scripts/init-premount/a_fips
+	chmod 0755 debian/fips-initramfs/usr/share/initramfs-tools/scripts/init-bottom/fips-initramfs
+	chmod 0700 debian/fips-initramfs/etc/fips-initramfs
+	chmod 0644 debian/fips-initramfs/etc/fips-initramfs/fips-initramfs.conf

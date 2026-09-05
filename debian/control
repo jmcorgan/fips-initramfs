@@ -1,0 +1,40 @@
+Source: fips-initramfs
+Section: net
+Priority: optional
+Maintainer: Johnathan Corgan <johnathan@corganlabs.com>
+Build-Depends: debhelper-compat (= 13),
+               ca-certificates,
+               curl
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/jmcorgan/fips-initramfs
+
+Package: fips-initramfs
+Architecture: any
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         initramfs-tools (>= 0.120) | initramfs-tools-core,
+         dropbear-initramfs
+Recommends: cryptsetup-initramfs
+Suggests: fips
+Description: FIPS mesh node in the initramfs for remote unlock
+ Starts a FIPS mesh node during early boot and binds dropbear to the
+ resulting fips0 interface, so an encrypted root filesystem can be
+ unlocked over the mesh rather than over the local IP network.
+ .
+ The node runs under a persistent identity generated at install time, so
+ its mesh address is fixed and is known before the machine boots. The
+ address is written into the generated image, and the boot scripts refuse
+ to report success if the node comes up at a different one.
+ .
+ Console passphrase entry is never disabled. Every failure in this path
+ leaves the operator at the ordinary cryptsetup prompt.
+ .
+ The package carries the fips daemon and fipsctl, taken from a published
+ FIPS release, so it needs nothing else installed to work. The booted
+ system runs no FIPS daemon of its own: the node exists only inside the
+ initramfs, for the length of the unlock.
+ .
+ A machine that also has the fips package installed uses that package's
+ binaries instead, so the node in the initramfs is the same build as the
+ daemon the booted system runs.

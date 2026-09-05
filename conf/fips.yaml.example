@@ -1,0 +1,93 @@
+# FIPS node configuration for the initramfs.
+#
+# This file is copied into the generated image as /etc/fips/fips.yaml,
+# and the identity key beside it as /etc/fips/fips.key. The daemon
+# derives the key path from the directory of the config file it loaded,
+# so the two names and their shared directory are not free choices.
+#
+# After editing this file, run:  update-initramfs -u
+# A dpkg trigger rebuilds the image when a package writes here. It does
+# not fire when you edit the file by hand, and the symptom of forgetting
+# appears one reboot later.
+
+node:
+  identity:
+    # Required. The default is an ephemeral keypair generated on every
+    # start, which puts the node at a new address on every boot and
+    # makes it unreachable by construction. The failure is silent: the
+    # daemon runs normally under the new identity.
+    persistent: true
+
+  control:
+    # Required. Left unset, the path resolves to a /tmp fallback in the
+    # initramfs, where /run/fips does not exist. A node whose control
+    # socket fails to bind still routes; you simply cannot query it.
+    socket_path: "/run/fips-control.sock"
+
+tun:
+  # Required. The default is false, which yields a healthy daemon with
+  # no fips0 interface at all and nothing for dropbear to bind to.
+  enabled: true
+  name: fips0
+  # Pinned rather than discovered. The session carries a passphrase and
+  # a little terminal traffic, so the value costs nothing and path
+  # discovery in early boot is one more thing to stall on.
+  mtu: 1280
+
+dns:
+  # Nothing in the initramfs resolves .fips names, so the responder is
+  # dead weight. It defaults to true and binds ::1:5354.
+  enabled: false
+
+transports:
+  udp:
+    bind_addr: "0.0.0.0:2121"
+
+# Static peers only. Nostr-mediated rendezvous needs DNS, a plausible
+# wall clock and relay reachability, none of which hold this early in
+# boot; it is off unless configured, so this file simply omits it.
+#
+# List a hostname and a literal address for each peer. Addresses are
+# tried in order of "priority", lowest first, so the name is preferred
+# and the address is the fallback for a boot where DNS has not come up.
+#
+# The hostname form works: the initramfs takes a resolver from its DHCP
+# lease, and a boot configured with a hostname and no address reached
+# its peer and became its tree child. Keep both anyway. The name
+# survives the peer moving; the address survives DNS being unavailable.
+# Neither alone survives both.
+#
+# A machine whose peers have all moved becomes unreachable with no
+# signal as to why, and the recovery is physical access to the console
+# prompt. More than one peer is the only mitigation on offer.
+
+# --- peers begin ---
+# Everything from this marker down is replaced when the package is
+# installed with a bootstrap peer given at the debconf prompt. Edit it
+# freely afterwards; the marker matters only on a first install.
+#
+# The defaults are the FIPS public test mesh, which accepts inbound
+# peering from any npub. They make the package work out of the box.
+# Replace them for anything you rely on.
+peers:
+  - npub: "npub1qmc3cvfz0yu2hx96nq3gp55zdan2qclealn7xshgr448d3nh6lks7zel98"
+    alias: "test-us01"
+    addresses:
+      - transport: udp
+        addr: "test-us01.fips.network:2121"
+        priority: 10
+      - transport: udp
+        addr: "217.77.8.91:2121"
+        priority: 20
+    connect_policy: auto_connect
+
+  - npub: "npub10yffd020a4ag8zcy75f9pruq3rnghvvhd5hphl9s62zgp35s560qrksp9u"
+    alias: "test-us02"
+    addresses:
+      - transport: udp
+        addr: "test-us02.fips.network:2121"
+        priority: 10
+      - transport: udp
+        addr: "23.182.128.74:2121"
+        priority: 20
+    connect_policy: auto_connect

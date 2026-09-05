@@ -1,0 +1,112 @@
+#!/bin/sh
+#
+# Boot-time premount: start the FIPS node and wait for its mesh address.
+#
+# The name begins with "a_" so that this script sorts ahead of the
+# dropbear script, which binds to an address this one has to create
+# first. That ordering is a filename accident rather than a declared
+# dependency; README.Debian says why, and what happens if it breaks.
+
+PREREQ=""
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+    ;;
+esac
+
+. /scripts/functions
+
+CONFIG=/etc/fips/fips.yaml
+EXPECTED_FILE=/etc/fips/mesh-address
+NPUB_FILE=/etc/fips/mesh-npub
+PIDFILE=/run/fips.pid
+LOGFILE=/run/fips.log
+IFACE=fips0
+
+# Twenty seconds, in whole-second steps. A fractional sleep would work
+# here, because dropbear-initramfs forces BUSYBOX=y through its
+# conf-hook and mkinitramfs reads conf-hooks.d after initramfs.conf. It
+# is avoided anyway: whole seconds also work under klibc, and the finer
+# granularity buys nothing against a wait measured in seconds.
+WAIT_ITERATIONS=20
+WAIT_INTERVAL=1
+
+[ -x /usr/bin/fips ] || exit 0
+
+fips_warn() {
+    echo "fips-initramfs: WARNING:" "$@" >&2
+}
+
+# The global-scope address currently on the mesh interface, or empty.
+#
+# The first line is taken with sed and not with head, because head is not
+# in every initramfs. Ubuntu's busybox-initramfs 1.36.1 has no head
+# applet and the image carries no head binary, so the pipeline printed
+# "head: not found" and returned empty on every call. That is worse than
+# a crash: the wait loop below then runs to its limit on every boot, the
+# script reports that remote unlock is unavailable when it is not, and
+# the address comparison it exists to make is never reached. Debian's
+# image does carry head, so the fault is invisible here. sed is already
+# used on the line above, so it is present wherever this pipeline runs at
+# all.
+current_address() {
+    ip -6 addr show dev "$IFACE" scope global 2>/dev/null \
+        | sed -n 's|^[[:space:]]*inet6 \([0-9a-fA-F:]*\)/.*|\1|p' \
+        | sed -n '1p'
+}
+
+modprobe tun || fips_warn "modprobe tun failed; the node will come up with no interface."
+
+# The dropbear boot script calls this too, in the background. Calling it
+# here is what makes the transport usable before the node starts.
+configure_networking
+
+log_begin_msg "Starting the FIPS node"
+/usr/bin/fips --config "$CONFIG" >"$LOGFILE" 2>&1 &
+echo $! > "$PIDFILE"
+log_end_msg
+
+expected=$(cat "$EXPECTED_FILE" 2>/dev/null) || expected=""
+# The name a connection must use. Absent when the identity predates
+# fips.pub, and the address is then reported on its own.
+npub=$(cat "$NPUB_FILE" 2>/dev/null) || npub=""
+
+i=0
+address=""
+while [ "$i" -lt "$WAIT_ITERATIONS" ]; do
+    address=$(current_address)
+    [ -n "$address" ] && break
+    sleep "$WAIT_INTERVAL"
+    i=$((i + 1))
+done
+
+# Three failures reach this point and none of them stops the boot. Each
+# leaves the console passphrase prompt as the way in, which is the whole
+# reason the wait is bounded.
+if [ -z "$address" ]; then
+    fips_warn "$IFACE has no global address after the wait; remote unlock is unavailable."
+    fips_warn "Check $LOGFILE from a console shell. A daemon that runs without"
+    fips_warn "an interface means tun.enabled is false or the tun module is absent."
+elif [ -z "$expected" ]; then
+    fips_warn "no expected address in the image; cannot check the identity."
+    fips_warn "$IFACE came up at $address."
+elif [ "$address" != "$expected" ]; then
+    fips_warn "$IFACE came up at $address, not the expected $expected."
+    fips_warn "The node is running under a different identity, so dropbear is"
+    fips_warn "bound to an address that does not exist. Remote unlock is unavailable."
+elif [ -n "$npub" ]; then
+    # Both, and the name first. Connecting to the bare address never
+    # works: resolving <npub>.fips through a FIPS DNS responder is what
+    # drives the mesh lookup, so a bare address makes no lookup and the
+    # connection fails with no route. The address is here to be checked
+    # against, not to be dialled.
+    log_success_msg "FIPS node up at $npub.fips ($address)"
+else
+    log_success_msg "FIPS node up at $address"
+fi

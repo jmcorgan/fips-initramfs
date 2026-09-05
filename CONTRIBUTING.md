@@ -1,0 +1,168 @@
+# Contributing to fips-initramfs
+
+This is a Debian source package: shell scripts, maintainer scripts and
+packaging. There is no compiler and no toolchain to pin, so the barrier
+to reading the whole thing is low. Two things about where the code runs
+make contributing here different from most shell projects.
+
+**It runs in the initramfs, as root, before the root filesystem is
+decrypted.** There is no system to fall back on, no logging beyond the
+console, and a mistake strands a machine at a prompt nobody is standing
+in front of. The boot scripts print what they did for that reason, and
+a change that makes them quieter is a change for the worse.
+
+**This project is `.deb`-only, and that is a packaging boundary rather
+than a design one.** It is built and installed as a Debian package and
+it hooks `initramfs-tools`, `dropbear-initramfs` and
+`cryptsetup-initramfs`. Ports are welcome; see below.
+
+**Linux is not one target.** Even within that family, each distribution
+assembles the initramfs
+with its own tooling and its own busybox, so a defect here is usually
+specific to one of them and invisible from the others. The worked
+example is `head`: the premount script used it, Ubuntu's
+`busybox-initramfs` has no `head` applet and its image carries no `head`
+binary, and the identity check silently failed open on every Ubuntu boot
+while Debian was perfectly happy. That shape of bug is the one to expect.
+
+## Quick start
+
+```bash
+git clone https://github.com/jmcorgan/fips-initramfs.git
+cd fips-initramfs
+dpkg-buildpackage -us -uc -b
+sh tests/hook-test.sh
+sh tests/functions-test.sh
+sh tests/premount-test.sh
+```
+
+The build needs `debhelper` at compatibility level 13, plus `curl` and
+`ca-certificates`, because it downloads the FIPS release it takes `fips`
+and `fipsctl` from. `FIPS_DEB` names a local file instead, for an
+offline build.
+
+The three suites need a shell and little else. Each skips with status 77
+rather than failing when a prerequisite is missing, so a skip is not a
+pass: read what it said.
+
+## Reporting bugs
+
+One issue per bug. Please include:
+
+- **The distribution and release**, and the `dropbear-initramfs`,
+  `cryptsetup-initramfs` and `initramfs-tools` versions. This is the
+  first thing to establish here and it is usually the answer.
+- **The commit or package version** the finding is against.
+- **What the console printed**, verbatim, around the FIPS lines.
+- **What you expected instead.**
+
+**Boot the machine with `quiet` off** before capturing that console
+output. With `quiet` set, `initramfs-tools` suppresses `log_begin_msg`
+and `log_success_msg`, and the console then shows nothing at all from
+the premount script: neither the success line naming the address nor the
+warnings it prints instead. A report taken with `quiet` on cannot
+distinguish a broken boot from a silent one. Ubuntu images ship
+`quiet splash` in `GRUB_CMDLINE_LINUX_DEFAULT`, so this is a step to
+take rather than a default to rely on.
+
+## Submitting pull requests
+
+**One logical change per pull request.** No drive-by reformatting, no
+unrelated refactors folded into a fix, and pre-existing warnings in
+files you did not touch are not yours to fix here.
+
+### Before opening one
+
+```bash
+shellcheck lib/functions tests/*.sh \
+    debian/config debian/postinst debian/postrm debian/fetch-fips-deb.sh \
+    initramfs/hooks/fips-initramfs \
+    initramfs/scripts/init-premount/a_fips \
+    initramfs/scripts/init-bottom/fips-initramfs
+sh tests/hook-test.sh
+sh tests/functions-test.sh
+sh tests/premount-test.sh
+dpkg-buildpackage -us -uc -b
+markdownlint '**/*.md'
+```
+
+**There is no CI yet.** Nothing automated will catch a regression on a
+distribution you did not try, so more of that burden sits with you than
+it would elsewhere. Say in the pull request which distributions you
+exercised and how far you got: building the package, building an image,
+or booting and unlocking a real machine. "Not tested on Ubuntu" is a
+useful thing to write. A confident silence is not.
+
+### Changing the boot scripts
+
+The hook and the two `initramfs/scripts/` files are the part where the
+distribution matrix bites.
+
+- **Every external command they call must exist in the image on all
+  five supported distributions.** Check the built image rather than
+  `busybox --list`: on Ubuntu, `modprobe` is absent from the applet list
+  and present in the image anyway as a `kmod` symlink, so the list
+  answers a different question than the one you are asking.
+- **A test must assert what the scripts printed, not merely that the
+  machine came up.** A test that checks only for a successful unlock
+  passes while the identity comparison fails open, which is exactly what
+  happened.
+- **The hook must never exit non-zero.** It warns and produces an image
+  with no FIPS node. A hook that fails leaves `initramfs-tools`
+  half-configured and aborts the apt run it belonged to, which is worse
+  than the fault it was reporting.
+
+### Bug-fix pull requests
+
+Add a regression test where one is tractable, and say so in the
+description when it is not. `tests/premount-test.sh` shows the shape for
+this project: it runs the parser with a `PATH` that deliberately has no
+`head`, which is the shape of the real fault rather than a proxy for it,
+and it lifts the function out of the boot script rather than copying it,
+so the test cannot drift from what actually boots.
+
+## Ports to other distributions
+
+**A port to any distribution that encrypts its root with LUKS is
+welcome.** Nothing about the idea needs `.deb`: a mesh node started
+early enough for dropbear to bind to it, and torn down before the real
+root takes over, is a shape any initramfs can hold.
+
+What would have to be rewritten is the packaging and the interface to
+the initramfs generator. Fedora, RHEL and SUSE use dracut; Arch uses
+mkinitcpio; each has its own idea of a hook, its own ordering mechanism
+and its own way of shipping a file into the image.
+
+What should carry over largely intact is the part worth having: start
+the node, wait for its address, **compare that address against the one
+written into the image**, and leave console entry alone as the fallback.
+A port that keeps the daemon and drops the comparison has kept the easy
+half.
+
+Open an issue before writing much of it. The question worth settling
+first is whether a port lives here as a second packaging tree or as its
+own repository, and that is easier to answer with someone who has
+actually looked at the target's generator.
+
+## AI coding assistant policy
+
+Use of AI coding assistants in preparing a contribution is welcome, and
+this project uses them itself. What is required is that you do a
+thorough manual review of the output before submitting: that the code
+does what it claims rather than merely running, that any test added
+tests something, that documentation matches behaviour, and that nothing
+unrelated came along for the ride. Be ready to discuss every line as if
+you wrote it, because for the purposes of accountability you did.
+
+Submissions that show signs of being unreviewed agent output will be
+answered in kind, without human review.
+
+## Where the conversation happens
+
+Bugs and design discussion go in the issue tracker. Discussion specific
+to a change in flight belongs on the pull request. FIPS itself is at
+<https://github.com/jmcorgan/fips>; findings in the daemon or in
+`fipsctl` belong there rather than here.
+
+For a suspected vulnerability, see [SECURITY.md](SECURITY.md) and email
+rather than opening an issue.

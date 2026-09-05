@@ -1,0 +1,43 @@
+fips-initramfs (0.1.0) unstable; urgency=medium
+
+  * Initial release. Starts a FIPS node in the initramfs and binds
+    dropbear to its fips0 address, for remote unlock of an encrypted
+    root filesystem over the mesh.
+  * The package carries the fips daemon and fipsctl, taken from the
+    latest FIPS release at build time and verified against that
+    release's checksums. Installing this one package is now the whole
+    procedure for a machine that runs no FIPS daemon of its own;
+    extracting the binaries out of the fips .deb by hand is gone. A
+    machine that does install the fips package still uses /usr/bin
+    first, so its initramfs node matches its daemon.
+  * README.Debian says that a second install asks nothing and keeps the
+    identity, and that seeing a first install means purging first.
+  * The boot script reports both the name and the address: "FIPS node up
+    at <npub>.fips (<address>)". The name is what a connection must use,
+    and printing the address alone invited the one mistake the rest of
+    the package warns against. The hook writes the npub into the image
+    beside the address; an identity with no fips.pub is reported by
+    address alone, as before.
+  * Take the first address in the premount script with sed rather than
+    head. Ubuntu's busybox-initramfs has no head applet and its image no
+    head binary, so the parser returned empty on every call: the wait ran
+    to its limit on every boot, the script reported that remote unlock
+    was unavailable while it was working, and the address comparison it
+    exists to make was never reached. Debian's image carries head, so
+    this was invisible there. Found by installing on Ubuntu 24.04.
+  * tests/premount-test.sh runs that parser with a PATH that has no head,
+    which is the shape of the fault.
+  * tests/hook-test.sh skips with a message when initramfs-tools is not
+    installed, rather than failing three dozen assertions at one cause.
+  * The install asks for the SSH public key allowed to unlock the machine
+    and writes it to /etc/dropbear/initramfs/authorized_keys, which
+    belongs to no package. It asks only when that file names no key, and
+    never overwrites one. An answer that is not a public key is refused
+    with an explanation rather than written.
+  * An SSH session into the initramfs runs cryptroot-unlock and cannot
+    open a shell. The forced command is added to the copy of
+    authorized_keys inside the generated image, so the file in
+    /etc/dropbear/initramfs stays untouched. Set
+    FIPS_FORCE_UNLOCK_COMMAND=no to turn it off during bring-up.
+
+ -- Johnathan Corgan <johnathan@corganlabs.com>  Tue, 01 Sep 2026 07:35:06 +0000

@@ -1,0 +1,191 @@
+#!/bin/sh
+#
+# Create the node configuration if there is none, generate this node's
+# unlock identity, and report the name to connect to.
+
+set -e
+
+. /usr/share/debconf/confmodule
+
+CONFDIR=/etc/fips-initramfs
+CONFFILE="$CONFDIR/fips.yaml"
+EXAMPLE=/usr/share/fips-initramfs/fips.yaml.example
+KEYFILE="$CONFDIR/fips.key"
+PUBFILE="$CONFDIR/fips.pub"
+PEER_MARKER='# --- peers begin ---'
+
+# shellcheck source=lib/functions
+. /usr/share/fips-initramfs/functions
+
+# Whether the configuration names any peer at all.
+peers_configured() {
+    sed 's/#.*//' "$CONFFILE" \
+        | grep -qE '^[[:space:]]*-?[[:space:]]*npub:'
+}
+
+# Write the configuration file from the example, substituting the peer
+# the administrator gave at the prompt.
+#
+# The file is not a dpkg conffile. It is copied if absent, the way the
+# fips package treats its own configuration, so an operator-edited or
+# configuration-management-rendered file is never clobbered and no
+# three-way merge prompt appears on upgrade.
+create_config() {
+    db_get fips-initramfs/peer-npub || true
+    peer_npub="$RET"
+    db_get fips-initramfs/peer-transport || true
+    peer_transport="${RET:-udp}"
+    db_get fips-initramfs/peer-address || true
+    peer_address="$RET"
+
+    if [ -z "$peer_npub" ] || [ -z "$peer_address" ]; then
+        # No usable answer. The example already carries the public test
+        # mesh, so it is copied whole.
+        cp "$EXAMPLE" "$CONFFILE"
+        if [ -n "$peer_npub" ] || [ -n "$peer_address" ]; then
+            echo "fips-initramfs: an npub and an address are both needed to" >&2
+            echo "fips-initramfs: configure a peer. Using the public test mesh." >&2
+        fi
+        return 0
+    fi
+
+    # Everything above the marker is prose and settings that apply
+    # either way; everything below it is the peer list being replaced.
+    sed "/^${PEER_MARKER}\$/,\$d" "$EXAMPLE" > "$CONFFILE"
+    cat >> "$CONFFILE" <<YAML
+# --- peers begin ---
+# Written at install time from the answers given at the prompt. Edit
+# freely; nothing rewrites this file once it exists.
+peers:
+  - npub: "$peer_npub"
+    addresses:
+      - transport: $peer_transport
+        addr: "$peer_address"
+        priority: 10
+    connect_policy: auto_connect
+YAML
+    echo "fips-initramfs: bootstrap peer set to $peer_transport $peer_address"
+}
+
+# Authorise the key the administrator gave at the prompt.
+#
+# /etc/dropbear/initramfs/authorized_keys belongs to no package:
+# dropbear-initramfs ships only dropbear.conf and documents this file as
+# the administrator's to create. So creating it here is not stepping on
+# another package, and an existing key is never touched.
+#
+# Without a key there is no remote unlock at all, which is why the
+# install asks rather than leaving it to be found out at the first remote
+# boot. Every path through this function that does not authorise a key
+# says so.
+authorise_key() {
+    if fips_have_ssh_key; then
+        return 0
+    fi
+
+    db_get fips-initramfs/ssh-key || true
+    # A key pasted into a dialog can arrive with a carriage return.
+    ssh_key=$(printf '%s' "$RET" | tr -d '\r')
+
+    if [ -z "$ssh_key" ]; then
+        echo "fips-initramfs: no SSH key was given, so this machine cannot be" >&2
+        echo "fips-initramfs: unlocked remotely. Put one in $FIPS_DROPBEAR_KEYS" >&2
+        echo "fips-initramfs: and run update-initramfs -u." >&2
+        return 0
+    fi
+
+    if ! fips_valid_ssh_key "$ssh_key"; then
+        echo "fips-initramfs: that does not look like an SSH public key, so" >&2
+        echo "fips-initramfs: nothing was written to $FIPS_DROPBEAR_KEYS." >&2
+        echo "fips-initramfs: Paste the whole line from a .pub file, then run" >&2
+        echo "fips-initramfs: dpkg-reconfigure fips-initramfs." >&2
+        return 0
+    fi
+
+    install -d -m 0755 "$(dirname "$FIPS_DROPBEAR_KEYS")"
+    # Appended, so a file of comments keeps them.
+    printf '%s\n' "$ssh_key" >> "$FIPS_DROPBEAR_KEYS"
+    chmod 0600 "$FIPS_DROPBEAR_KEYS"
+    echo "fips-initramfs: authorised one key in $FIPS_DROPBEAR_KEYS"
+}
+
+case "$1" in
+    configure)
+        # The directory holds a secret key, so it is not world readable.
+        # dh_fixperms leaves the packaged mode alone, and this restores
+        # it after an upgrade unpacks the directory again.
+        install -d -m 0700 "$CONFDIR"
+
+        if [ ! -e "$CONFFILE" ]; then
+            create_config
+            chmod 0644 "$CONFFILE"
+        fi
+
+        # The package installs its own copies, so this is not reached by
+        # an ordinary install. It stays because the search can still come
+        # up empty: FIPS_BINDIR can name a directory that is wrong, and
+        # the copies can be removed by hand. The install still succeeds,
+        # and the image build declines to include a node in that state,
+        # so nothing silently ships without an identity.
+        if ! bindir=$(fips_bindir); then
+            echo "fips-initramfs: no identity was generated." >&2
+            fips_bindir_advice >&2
+            echo "fips-initramfs: then run: dpkg-reconfigure fips-initramfs" >&2
+            exit 0
+        fi
+
+        if [ ! -f "$KEYFILE" ]; then
+            # fipsctl generates a keypair without contacting a daemon,
+            # which is what makes it usable from here. It writes
+            # fips.key at 0600 and fips.pub at 0644.
+            #
+            # Its output is held back rather than discarded: the notice
+            # it prints about setting node.identity.persistent does not
+            # apply here, since the shipped configuration already sets
+            # it, but a real error still has to reach the operator.
+            if ! keygen_output=$("$bindir/fipsctl" keygen --dir "$CONFDIR" 2>&1); then
+                echo "$keygen_output" >&2
+                exit 1
+            fi
+        fi
+        chmod 0600 "$KEYFILE"
+        # Guarded so a missing public key does not abort the script
+        # under "set -e".
+        [ -f "$PUBFILE" ] && chmod 0644 "$PUBFILE" || true
+
+        authorise_key
+
+        # Report the name to connect to, and the address only as a
+        # secondary fact.
+        #
+        # The name is what a connection must use. Resolving <npub>.fips
+        # through a FIPS DNS responder is what drives the mesh lookup;
+        # given a bare address there is nothing to resolve and the
+        # connection fails with no route. The npub is also unreadable
+        # once the machine is locked, so this is the moment to record it.
+        if address=$("$bindir/fipsctl" address --key "$PUBFILE" 2>/dev/null); then
+            if [ -f "$PUBFILE" ]; then
+                echo "fips-initramfs: unlock this node at $(cat "$PUBFILE").fips"
+                echo "fips-initramfs: record that name. Connect to it, not to the"
+                echo "fips-initramfs: address $address, which will not resolve."
+            else
+                echo "fips-initramfs: this node's mesh address is $address"
+            fi
+        else
+            echo "fips-initramfs: cannot derive the mesh address." >&2
+            echo "fips-initramfs: FIPS 0.5.0 or later is required." >&2
+        fi
+
+        if ! peers_configured; then
+            echo "fips-initramfs: no bootstrap peers are configured." >&2
+            echo "fips-initramfs: edit $CONFFILE and add at least one," >&2
+            echo "fips-initramfs: then run update-initramfs -u." >&2
+            echo "fips-initramfs: until then the generated image carries no" >&2
+            echo "fips-initramfs: FIPS node and unlock is console-only." >&2
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,29 @@
+// markdownlint config for the fips-initramfs repository.
+//
+// Kept deliberately in step with the FIPS documentation conventions, so a
+// document can move between projects without being rewrapped.
+//
+// Picked up automatically by:
+//   - the markdownlint CLI when invoked on any file under this tree
+//     (it walks up from each file's parent directory),
+//   - the David Anson markdownlint extension for VS Code / Cursor
+//     when this directory is the workspace root.
+//
+// Documented rule reference: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+{
+  // Inherit defaults for everything not listed below.
+  "default": true,
+
+  // MD013/line-length: too noisy for our prose. Long URLs and table rows
+  // routinely exceed 80 chars, and rewrapping prose just to satisfy the
+  // rule hurts readability.
+  "MD013": false,
+
+  // MD024/no-duplicate-heading: triggers on legitimate repeated subsection
+  // names in any document with parallel-by-something structure.
+  "MD024": false,
+
+  // MD041/first-line-h1: the specification opens with a provenance comment
+  // rather than an H1, and template fragments do the same.
+  "MD041": false
+}

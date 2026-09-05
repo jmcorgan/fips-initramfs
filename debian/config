@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# Ask what the install needs to know, before the package is unpacked:
+# the bootstrap peer this node dials, and the SSH key allowed to unlock
+# the machine.
+
+set -e
+
+. /usr/share/debconf/confmodule
+
+CONFFILE=/etc/fips-initramfs/fips.yaml
+DROPBEAR_KEYS=/etc/dropbear/initramfs/authorized_keys
+
+# The peer questions are asked only when there is no configuration file.
+# An existing file is the administrator's, and answering a prompt must
+# not be a way to silently overwrite it.
+if [ ! -e "$CONFFILE" ]; then
+    db_input high fips-initramfs/peer-npub || true
+    db_go || true
+
+    db_get fips-initramfs/peer-npub
+    if [ -n "$RET" ]; then
+        db_input high fips-initramfs/peer-transport || true
+        db_input high fips-initramfs/peer-address || true
+        db_go || true
+    fi
+fi
+
+# The key dropbear admits into the initramfs. Without one there is no
+# remote unlock at all, so the install asks rather than leaving it to be
+# found out at the first remote boot.
+#
+# This script runs before the package is unpacked, so it cannot use
+# fips_have_ssh_key from lib/functions, and it tests only whether the
+# file has anything in it. The exact test is in the postinst, which never
+# writes over a file that already names a key.
+if [ ! -s "$DROPBEAR_KEYS" ]; then
+    db_input high fips-initramfs/ssh-key || true
+    db_go || true
+fi
+
+exit 0

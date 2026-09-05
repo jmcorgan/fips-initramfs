@@ -1,0 +1,458 @@
+fips-initramfs for Debian
+=========================
+
+This package starts a FIPS mesh node during early boot and binds dropbear
+to the node's fips0 address. An operator can then reach the machine over
+the mesh and run cryptroot-unlock to unlock an encrypted root filesystem.
+
+
+The binaries come with the package
+----------------------------------
+
+The package carries the fips daemon and fipsctl in
+/usr/lib/fips-initramfs/bin, so it needs nothing else installed and
+nothing done by hand. They are taken from a published FIPS release at
+build time and verified against the checksums that release publishes;
+/usr/share/fips-initramfs/fips-version records which release.
+
+The booted system runs no FIPS daemon and has no fips0. The node exists
+only inside the initramfs, for the length of the unlock.
+
+Install the fips package as well if you want a daemon on the running
+system. /usr/bin is then searched first, so the node in the initramfs is
+the same build as the daemon the booted system runs. That is the only
+difference it makes here.
+
+FIPS_BINDIR in /etc/fips-initramfs/fips-initramfs.conf replaces the
+search rather than extending it: a directory named there and found
+wanting is an error, not a reason to quietly use a different daemon.
+
+
+Setting it up
+-------------
+
+1. Install the package. It asks for a bootstrap peer: an npub, a
+   transport and an address. Leave the npub blank to use the FIPS public
+   test mesh, which is what the shipped configuration carries and which
+   accepts inbound peering from any npub.
+
+   The install then generates an identity keypair in /etc/fips-initramfs
+   and prints the name this machine unlocks at. Record that name.
+
+2. Review /etc/fips-initramfs/fips.yaml. The prompt sets one peer; more
+   than one is better, and the shipped defaults show the shape. This
+   file is created by the install and is never rewritten afterwards, so
+   edit it freely.
+
+3. Nothing, if you answered the SSH key question during the install.
+
+   The install asks for the public key allowed to unlock this machine and
+   writes it to /etc/dropbear/initramfs/authorized_keys. It asks only
+   when that file names no key, and it never overwrites one that is
+   there. Answer with the whole line from a .pub file, and write the key
+   on its own with no options in front of it; the package adds the forced
+   command described below.
+
+   Add further keys to that file yourself. It belongs to no package:
+   dropbear-initramfs ships only dropbear.conf and documents this file in
+   /usr/share/doc/dropbear-initramfs/README.initramfs.
+
+   If you left the question blank, the install says so and this machine
+   has no remote unlock until you put a key there and run
+   update-initramfs -u.
+
+4. Run: update-initramfs -u
+
+   The install already built an image, so this is only needed after you
+   change something: another key, a different peer, or a setting.
+
+5. Test the result before you rely on it. Reboot with console access, and
+   confirm that you can reach <npub>.fips over the mesh and that
+   cryptroot-unlock completes the boot. Connect to the name, never to the
+   bare address; see below for why.
+
+
+A second install asks nothing, and that is deliberate
+-----------------------------------------------------
+
+Installing over an existing install is silent: neither question comes back
+and the machine keeps the identity it had. Three things account for it,
+and each is wanted.
+
+  - debconf remembers the answers, so the questions are not asked again.
+  - The key question is asked only when authorized_keys names no key, and
+    the answer is never written over one that is there.
+  - postinst generates a keypair only when there is none, so the npub is
+    stable and a name you published keeps resolving.
+
+The consequence is worth knowing before you go looking for a fault:
+**to see what a first install does, purge first.** dpkg -P removes
+/etc/fips-initramfs and the identity with it, and the next install asks
+everything and generates a new npub. Reinstalling without purging is the
+right thing on a machine you are keeping and the wrong thing on a machine
+you are testing.
+
+
+The session is forced to cryptroot-unlock
+----------------------------------------
+
+An SSH session into the initramfs runs cryptroot-unlock and cannot open
+a shell. That is the default and it needs nothing from you:
+
+  ssh -i your-key root@<npub>.fips
+
+Dropbear runs a forced command whatever the client asks for, so naming
+another command has no effect either. The reason is the one the Security
+section gives: the initramfs shell is a root shell with the mesh already
+attached, so an unrestricted session is a foothold on the mesh and not
+only on this machine.
+
+The package makes the change on the copy of authorized_keys inside the
+generated image. The file in /etc/dropbear/initramfs is never touched,
+so it stays yours and stays what dropbear-initramfs documents.
+
+Two cases are left alone, and update-initramfs reports each one:
+
+  - A key that already carries its own options. Prepending to it could
+    duplicate a command= you set or defeat a restriction, so the line is
+    left exactly as written and gets no forced command.
+
+  - Every key, when cryptroot-unlock is not in the image. That is what
+    happens without cryptsetup-initramfs, and forcing a command that
+    does not exist would close every session at once.
+
+To turn it off, set FIPS_FORCE_UNLOCK_COMMAND=no in
+/etc/fips-initramfs/fips-initramfs.conf and run update-initramfs -u. Do
+that while bringing a machine up. A shell in the initramfs is how a
+failed unlock gets diagnosed, and there is no other way in once the
+machine is remote and locked.
+
+
+The configuration file is created, not shipped
+---------------------------------------------
+
+/etc/fips-initramfs/fips.yaml is not a dpkg conffile. The package ships
+/usr/share/fips-initramfs/fips.yaml.example, and the install copies it
+into place, substituting the peer from the prompt, only when no file is
+there already.
+
+So an upgrade never produces a three-way merge prompt for it, never
+clobbers an operator-edited or configuration-management-rendered file,
+and never revisits the peer question once the file exists. A later
+dpkg-reconfigure will ask again but will change nothing; edit the file.
+
+Purging the package removes it, along with the identity.
+
+The one file that IS a conffile is fips-initramfs.conf, which carries
+only FIPS_BINDIR.
+
+
+What the bootstrap peer prompt accepts
+--------------------------------------
+
+The install asks for the peer in three parts. All three have to make
+sense together, and the answers are used only when the configuration
+file does not already exist.
+
+  Bootstrap peer npub:       an npub1... string, or blank
+  Bootstrap peer transport:  udp (the default), tcp, tor or ethernet
+  Bootstrap peer address:    host:port
+
+The npub is the peer's identity, exactly as FIPS prints it. Leave it
+blank to keep the shipped defaults, which are the FIPS public test mesh.
+
+The transport is normally udp. Only udp and tcp make sense this early in
+a boot: tor and ethernet are accepted, but tor needs a running Tor and
+ethernet needs a peer on the same segment.
+
+The address is where to dial that peer, as host:port. Either a hostname
+or a literal address will do. A hostname needs a resolver, which the
+initramfs takes from its DHCP lease; a literal address needs none.
+
+The npub and the address are both required. Giving one without the
+other is not a partial answer: the install says so and falls back to the
+shipped defaults.
+
+  fips-initramfs: an npub and an address are both needed to
+  fips-initramfs: configure a peer. Using the public test mesh.
+
+An answer produces one peer, at priority 10, with connect_policy
+auto_connect:
+
+  peers:
+    - npub: "npub1..."
+      addresses:
+        - transport: udp
+          addr: "peer.example.net:2121"
+          priority: 10
+      connect_policy: auto_connect
+
+The prompt cannot express more than that. A second peer, a second
+address for the same peer, or an alias is an edit to
+/etc/fips-initramfs/fips.yaml afterwards, followed by update-initramfs
+-u. The shipped fips.yaml.example is the worked example of the fuller
+form.
+
+
+Peer addresses and their order
+------------------------------
+
+Each peer takes a list of addresses, tried in order of "priority",
+lowest first. The shipped defaults give each peer a hostname at 10 and a
+literal address at 20.
+
+Both are worth having. The hostname form works in an initramfs: the
+resolver comes from the DHCP lease, and a machine configured with a
+hostname and no address reached its peer and became its tree child. But
+a name needs DNS to have come up, and an address does not survive the
+peer moving. Neither alone covers both.
+
+
+What the node adds to the image
+-------------------------------
+
+The daemon and its configuration make the generated initramfs about 10 MB
+larger. Measured on Ubuntu 24.04: 76 MB without the node and 85.8 MB with
+it, a rise of roughly 13 per cent.
+
+That is comfortable on a normal /boot and it is not on a small one.
+Several kernels are kept, so the cost is paid once per kernel. Check the
+free space on /boot before installing this on a machine with a /boot of
+a few hundred megabytes.
+
+
+Editing the configuration does not rebuild the image
+----------------------------------------------------
+
+A dpkg file trigger rebuilds the initramfs when a package writes into a
+watched path. It does not fire when you edit a file by hand. So an edit
+to /etc/fips-initramfs/fips.yaml has no effect until you run
+update-initramfs -u.
+
+The symptom of forgetting appears one reboot later, and it is silent.
+
+
+A stale bootstrap peer makes the machine unreachable
+-----------------------------------------------------
+
+The node in the initramfs uses static peers only. Nostr-mediated
+rendezvous needs DNS, a plausible wall clock and relay reachability. None
+of those hold this early in boot.
+
+If every configured peer has moved, the node converges with nobody. There
+is no diagnostic on the console and no signal as to why. The only
+recovery is physical access to the console passphrase prompt.
+
+Configure several always-on peers with public endpoints. This is the
+mitigation the package offers, and it is the only one.
+
+
+Console entry always survives
+-----------------------------
+
+The wait for the mesh is bounded. If the mesh does not come up, the boot
+falls through to the ordinary cryptsetup passphrase prompt on the
+console. Every failure in this path behaves that way: no DHCP lease, no
+route to a peer, a peer that moved, a rejected clock, or a tun module
+that a kernel upgrade left out of the image.
+
+Never disable console passphrase entry on a machine that uses this
+package.
+
+A graphical console changes nothing here. /lib/cryptsetup/askpass is one
+binary that asks through plymouth when plymouth is running and creates
+and watches /lib/cryptsetup/passfifo either way, and cryptroot-unlock
+finds its target by looking for the process holding that FIFO rather
+than by looking at the console. Tested with plymouth installed and
+"splash" on the kernel command line: plymouthd was running in the
+initramfs, plymouth --ping answered, and the unlock over the mesh
+succeeded unchanged.
+
+What would break it is a keyscript= in crypttab that is not askpass.
+There is then no FIFO, and cryptroot-unlock has nothing to write to.
+
+
+When the image is built without a FIPS node
+------------------------------------------
+
+update-initramfs prints a warning and builds the image anyway whenever
+something the node needs is missing: no bootstrap peers, no fips and
+fipsctl to be found, no identity key, or a fipsctl too old to derive an
+address. The image is a plain dropbear-initramfs image, and unlock is
+console-only until the cause is fixed and update-initramfs -u is run.
+
+The build is never failed for this. A failing initramfs hook leaves
+initramfs-tools half-configured and aborts whatever apt run it belonged
+to, which turns a misconfigured unlock into a broken package system. An
+image with no FIPS node still boots and still asks for the passphrase on
+the console.
+
+Watch for those warnings during an upgrade. They are the only signal,
+and the symptom otherwise appears at the next remote boot.
+
+
+What the boot scripts check
+---------------------------
+
+The image carries the mesh address the node is expected to come up at,
+and the name that address belongs to. The premount script compares the
+address on fips0 against the expected one and warns when they differ. On
+success it prints both:
+
+  Success: FIPS node up at npub1....fips (fd13:7a57:...)
+
+The name is the part to connect to. The address is there to be checked
+against, and dialling it directly never works; see below.
+
+That check exists because the two most likely failures both leave a
+healthy daemon running:
+
+  - A missing or misnamed key file does not fail the boot. The daemon
+    generates a new keypair and runs normally under a new identity, at an
+    address nobody is connecting to.
+
+  - tun.enabled set to false, or a tun module absent from the image,
+    gives a running daemon with no fips0 at all.
+
+Neither a process liveness check nor the presence of fips0 can see the
+first one. Read /run/fips.log from a console shell when a warning fires.
+
+
+Script ordering
+---------------
+
+The premount script is named a_fips so that it sorts ahead of the
+dropbear script. It has to, because dropbear binds to an address this
+package creates.
+
+initramfs-tools orders boot scripts with tsort over their declared
+PREREQ lines, and falls back to the sorted filename list for scripts with
+no relationship. The dropbear script cannot declare a dependency on a
+package it does not know about, so the ordering rests on that fallback.
+
+If a future version of initramfs-tools or dropbear-initramfs reorders
+them, dropbear binds before the address exists and remote unlock stops
+working. The console prompt still works. This is a known and accepted
+fragility.
+
+
+Security
+--------
+
+The node key, the dropbear host key and authorized_keys all sit
+unencrypted in /boot. Anyone who can read the image can impersonate this
+unlock node end to end and phish the passphrase.
+
+That exposure is not new. dropbear-initramfs already has it with its host
+key. What FIPS changes is reach: the impersonating node no longer needs
+to sit on your network path, because it can present itself on the mesh
+from anywhere.
+
+The mesh transport does not protect against this. Three things narrow it:
+
+  - The peer ACL, which admits or refuses peers by npub.
+  - The default-deny nftables baseline the fips package ships at
+    /etc/fips/fips.nft, which permits only TCP 22 from the mesh.
+  - UMASK=0077 for the generated image. dropbear-initramfs already sets
+    this through its own initramfs-tools conf-hook, so it holds wherever
+    this package is installed.
+
+The session itself is restricted by default. See "The session is forced
+to cryptroot-unlock" above: an SSH session into the initramfs runs that
+command and cannot open a shell.
+
+The rest of the restrictions are yours to add, in
+/etc/dropbear/initramfs/authorized_keys:
+
+  no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... you@host
+
+A key line that already carries options is left exactly as it is, so a
+line like that one gets no forced command and update-initramfs says so.
+Write the command yourself when you add options:
+
+  command="/usr/bin/cryptroot-unlock",no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... you@host
+
+Whether to add no-pty depends on how you unlock. It is safe for a piped
+passphrase and it stops an interactive prompt from being drawn.
+
+
+Removing and purging
+--------------------
+
+dpkg -r keeps the identity in /etc/fips-initramfs and rebuilds the image
+without a FIPS node, so reinstalling brings back the same mesh address.
+dpkg -P removes the identity along with the rest of that directory.
+
+The binaries in /usr/lib/fips-initramfs/bin belong to the package and go
+with it, whether it is removed or purged.
+
+
+The FIPS version floor
+----------------------
+
+This package needs fipsctl's offline address command, which first shipped
+in FIPS 0.5.0. The build refuses a release older than that, so the copies
+the package carries always clear the floor.
+
+The floor is not enforced on a machine that installs the fips package,
+because /usr/bin is searched first and nothing here decides what version
+goes there. An older fipsctl has no address command; the image is then
+built without a FIPS node and update-initramfs says why. The bundled
+copies are not tried as a fallback in that case.
+
+The two packages are not built from one source tree, and the FIPS
+configuration schema is not stable, so a newer FIPS can introduce a
+schema break that nothing detects until boot. The release this package
+bundles is the one it was last tested against, and it moves by hand after
+someone re-runs the boot test.
+
+
+Unlocking
+---------
+
+Connect to the recorded name. The session runs cryptroot-unlock on its
+own, unless you turned that off. If it reports that there is nothing to
+unlock, the console prompt has not been reached yet. Retry rather than
+assume the setup is broken.
+
+Several encrypted devices, including a separately encrypted swap or
+resume device, are prompted for in sequence and are handled in the same
+session.
+
+Send the passphrase with no trailing newline:
+
+  printf '%s' 'your passphrase' | ssh -i key root@<npub>.fips
+
+On a terminal cryptroot-unlock reads the passphrase and strips the
+newline. Given a pipe it copies stdin into the askpass FIFO verbatim, so
+a trailing newline becomes part of the passphrase and the unlock fails
+with "bad password or options". Three such failures exhaust the
+cryptsetup retry count for that boot.
+
+
+Always connect to the name, never the address
+---------------------------------------------
+
+Use <npub>.fips. Do not use the bare IPv6 address, even though the
+install prints one and the boot scripts compare against it.
+
+A mesh address has to be resolved to tree coordinates before anything can
+reach it, and resolving the .fips name through the FIPS DNS responder is
+what drives that resolution. Given a bare address there is nothing to
+resolve, so the lookup is never made and the connection fails with no
+route. Measured: ninety seconds of pinging a bare address never got
+through, while resolving the name and then connecting worked on the first
+try from a cold cache.
+
+So the machine you connect FROM needs a FIPS daemon with its DNS
+responder enabled and the system resolver pointed at it. That is what the
+fips package's fips-dns.service arranges. This is a property of the
+connecting machine, not of the one being unlocked: the node in the
+initramfs has dns.enabled set to false, because nothing in an initramfs
+resolves .fips names.
+
+The install prints the npub for this reason. Record it. Once the machine
+is locked there is no way to read it off.
+
+  ssh -i your-key root@<npub>.fips
+

@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# Remove the generated identity and configuration on purge, and rebuild
+# the image on removal so it stops carrying the key.
+
+set -e
+
+CONFDIR=/etc/fips-initramfs
+
+case "$1" in
+    purge)
+        # Removed on purge but not on remove. Reinstalling must not
+        # change the name the operator has been connecting to.
+        #
+        # fips.yaml is listed explicitly because it is not a dpkg
+        # conffile: postinst creates it, so dpkg does not know about it
+        # and will not remove it.
+        rm -f "$CONFDIR/fips.key" "$CONFDIR/fips.pub" "$CONFDIR/fips.yaml"
+        rmdir --ignore-fail-on-non-empty "$CONFDIR" 2>/dev/null || true
+        ;;
+    remove)
+        # The image still holds a copy of the key and the config until it
+        # is regenerated. The dpkg trigger fires on unpack, not here.
+        if command -v update-initramfs >/dev/null 2>&1; then
+            update-initramfs -u >/dev/null || true
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

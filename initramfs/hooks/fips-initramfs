@@ -1,0 +1,231 @@
+#!/bin/sh
+#
+# Build-time hook: place the FIPS daemon, its configuration and its
+# identity key into the generated image, and bind dropbear to the mesh
+# address that identity resolves to.
+#
+# PREREQ names two hooks this one reads the output of. The dropbear hook
+# copies the configuration this script appends to and the authorized_keys
+# it rewrites. The cryptroot-unlock hook puts cryptroot-unlock in the
+# image, which is the command the rewrite names; without the dependency
+# that hook runs later, and the command is measurably absent when this
+# one looks for it.
+#
+# Naming a hook that is not installed is safe: initramfs-tools tsorts the
+# names and skips any that has no file. cryptsetup-initramfs is
+# recommended, not depended on, so that case is real.
+#
+# Hook ordering is a declared dependency and is honoured. Boot-script
+# ordering is not, and is discussed in README.Debian.
+
+PREREQ="dropbear cryptroot-unlock"
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+    ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# Overridable so the hook can be exercised outside a real image build.
+# initramfs-tools sets none of these, so the defaults are what ships.
+CONFDIR="${FIPS_CONFDIR:-/etc/fips-initramfs}"
+SSH_PORT="${FIPS_SSH_PORT:-22}"
+FUNCTIONS="${FIPS_FUNCTIONS:-/usr/share/fips-initramfs/functions}"
+
+# shellcheck source=lib/functions
+. "$FUNCTIONS"
+
+warn() {
+    echo "fips-initramfs: WARNING:" "$@" >&2
+}
+
+# Leave the image without a FIPS node, loudly, and let the build finish.
+#
+# Exiting non-zero here would be more emphatic and is the wrong trade. A
+# hook that fails makes update-initramfs fail, which makes the
+# initramfs-tools trigger fail, which leaves initramfs-tools
+# half-configured and aborts whatever apt run it was part of. Measured on
+# Debian 13: dpkg -l then reports "iF" and dpkg --audit flags it.
+#
+# Skipping is also what the package promises elsewhere. Every failure in
+# this path is meant to leave the operator at the console passphrase
+# prompt, and an image with no FIPS node does exactly that. An image
+# built around a missing key would not.
+skip() {
+    warn "$@"
+    warn "Leaving the image without a FIPS node. Unlock will be"
+    warn "console-only until this is fixed and update-initramfs -u is run."
+    exit 0
+}
+
+# Whether the configuration names any peer at all.
+#
+# The shipped configuration carries working public test-mesh peers, so
+# an untouched install is usable rather than inert. Only an emptied peer
+# list reaches this, and it means someone removed the peers without
+# adding any, which would give a node that starts and converges with
+# nobody.
+peers_configured() {
+    sed 's/#.*//' "$CONFDIR/fips.yaml" \
+        | grep -qE '^[[:space:]]*-?[[:space:]]*npub:'
+}
+
+[ -f "$CONFDIR/fips.yaml" ] || skip "$CONFDIR/fips.yaml is missing."
+
+# A node with no peers would start, reach nobody, and leave a machine
+# that looks configured and is not. Say what to do rather than what went
+# wrong, because nothing has failed; a peer has simply not been named.
+if ! peers_configured; then
+    warn "no bootstrap peers are configured in $CONFDIR/fips.yaml."
+    warn "Leaving the image without a FIPS node. Add a peer to that file,"
+    warn "then run update-initramfs -u."
+    exit 0
+fi
+
+# Every check from here leaves the image without a FIPS node rather than
+# building one around a missing piece. An image that boots to a node at
+# an unexpected address looks identical at boot time to a working one,
+# and the operator finds out when the machine is already remote and
+# locked. An image with no node at all stops at the console prompt, which
+# is visible on the first boot.
+if ! bindir=$(fips_bindir); then
+    fips_bindir_advice >&2
+    skip "cannot find the fips daemon and fipsctl."
+fi
+DAEMON="$bindir/fips"
+FIPSCTL="$bindir/fipsctl"
+
+[ -f "$CONFDIR/fips.key" ] || skip "$CONFDIR/fips.key is missing; reinstall the package to generate one."
+
+# Derive the address from the public key, so the private key is not read
+# here. Both forms give the same answer.
+keyfile="$CONFDIR/fips.key"
+[ -f "$CONFDIR/fips.pub" ] && keyfile="$CONFDIR/fips.pub"
+
+address=$("$FIPSCTL" address --key "$keyfile" 2>/dev/null) \
+    || skip "$FIPSCTL address failed. FIPS 0.5.0 or later is required."
+[ -n "$address" ] || skip "the mesh address derived from $keyfile is empty."
+
+copy_exec "$DAEMON" /usr/bin
+manual_add_modules tun
+
+# The daemon derives the key path from the directory of the config file
+# it loaded, so the two must sit together and the key must be named
+# fips.key.
+mkdir -p -- "${DESTDIR}/etc/fips"
+cp -p -- "$CONFDIR/fips.yaml" "${DESTDIR}/etc/fips/fips.yaml"
+cp -p -- "$CONFDIR/fips.key" "${DESTDIR}/etc/fips/fips.key"
+chmod 0600 -- "${DESTDIR}/etc/fips/fips.key"
+
+# The address the boot script must see. Writing it into the image is what
+# lets the premount script tell a healthy node from one that regenerated
+# its identity or came up with no interface at all.
+printf '%s\n' "$address" > "${DESTDIR}/etc/fips/mesh-address"
+chmod 0644 -- "${DESTDIR}/etc/fips/mesh-address"
+
+# The name the node is reached by, written beside the address so the boot
+# script can print both. A connection must use the name: resolving
+# <npub>.fips through a FIPS DNS responder is what drives the mesh
+# lookup, and a bare address resolves nothing. Printing only the address
+# at boot invites exactly the mistake the rest of the package warns
+# against.
+#
+# Absent when the identity predates fips.pub, in which case the boot
+# script prints the address alone.
+if [ -f "$CONFDIR/fips.pub" ]; then
+    cp -p -- "$CONFDIR/fips.pub" "${DESTDIR}/etc/fips/mesh-npub"
+    chmod 0644 -- "${DESTDIR}/etc/fips/mesh-npub"
+fi
+
+# Force every session the initramfs key opens to run cryptroot-unlock.
+#
+# The rewrite is made on the copy inside the image and never on
+# /etc/dropbear/initramfs/authorized_keys, for the reason the
+# dropbear.conf append below composes rather than edits: that file
+# belongs to dropbear-initramfs and to the administrator.
+#
+# The initramfs shell is a root shell with the mesh already attached, so
+# an unrestricted session is a foothold on the mesh and not only on this
+# machine. Dropbear runs a forced command whatever the client asks for,
+# so the session cannot open one.
+force_unlock_command() {
+    # Where dropbear's hook wrote the file. It takes root's home from
+    # the image's passwd, and the directory name is randomised, so the
+    # path has to be read rather than assumed.
+    _fuc_home=$(grep -m1 '^root:' "${DESTDIR}/etc/passwd" 2>/dev/null | cut -sd: -f6)
+    _fuc_keys="${DESTDIR}${_fuc_home}/.ssh/authorized_keys"
+    if [ -z "$_fuc_home" ] || [ ! -f "$_fuc_keys" ]; then
+        warn "the image carries no authorized_keys, so no unlock command was forced."
+        warn "Remote unlock needs a key in /etc/dropbear/initramfs/authorized_keys."
+        return 0
+    fi
+
+    # cryptsetup-initramfs is recommended, not depended on, so the
+    # command can be absent. Forcing a command that does not exist would
+    # close every session immediately and leave console entry as the only
+    # way in, without saying why.
+    _fuc_cmd=""
+    for _fuc_cand in /usr/bin/cryptroot-unlock /bin/cryptroot-unlock; do
+        if [ -x "${DESTDIR}${_fuc_cand}" ]; then
+            _fuc_cmd="$_fuc_cand"
+            break
+        fi
+    done
+    if [ -z "$_fuc_cmd" ]; then
+        warn "cryptroot-unlock is not in the image, so no unlock command was forced."
+        warn "Install cryptsetup-initramfs if this machine unlocks an encrypted root."
+        return 0
+    fi
+
+    # A line that already carries options is left exactly as it is. The
+    # administrator has expressed an intent there, and prepending to it
+    # could duplicate a command= they set or defeat a restriction.
+    awk -v cmd="command=\"$_fuc_cmd\"" '
+        /^[ \t]*($|#)/ { print; next }
+        $1 ~ /^(ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)$/ {
+            print cmd " " $0
+            next
+        }
+        { print; kept = kept + 1 }
+        END { if (kept > 0) exit 9 }
+    ' "$_fuc_keys" > "${_fuc_keys}.fips-new"
+    _fuc_status=$?
+
+    if [ "$_fuc_status" != 0 ] && [ "$_fuc_status" != 9 ]; then
+        rm -f -- "${_fuc_keys}.fips-new"
+        warn "could not rewrite authorized_keys in the image; no command was forced."
+        return 0
+    fi
+
+    # Written back through the original file, so its mode and owner are
+    # the ones dropbear's hook set.
+    cat -- "${_fuc_keys}.fips-new" > "$_fuc_keys"
+    rm -f -- "${_fuc_keys}.fips-new"
+
+    if [ "$_fuc_status" = 9 ]; then
+        warn "a key in authorized_keys already carries options and was left as it is."
+        warn "Sessions it opens are not forced to cryptroot-unlock."
+    fi
+}
+
+if fips_force_unlock; then
+    force_unlock_command
+fi
+
+# Bind dropbear to that address. The dropbear hook has already copied
+# /etc/dropbear/initramfs/dropbear.conf to this path, and the dropbear
+# boot script sources it. Appending here composes with whatever the
+# administrator set, and does not touch another package's conffile.
+mkdir -p -- "${DESTDIR}/etc/dropbear"
+cat >> "${DESTDIR}/etc/dropbear/dropbear.conf" <<CONF
+
+# Added by fips-initramfs: bind to this node's mesh address.
+DROPBEAR_OPTIONS="\${DROPBEAR_OPTIONS-} -p [${address}]:${SSH_PORT}"
+CONF

@@ -1,0 +1,59 @@
+Template: fips-initramfs/peer-npub
+Type: string
+Default:
+Description: Bootstrap peer npub:
+ The node in the initramfs reaches the mesh through static peers. It cannot
+ use Nostr rendezvous, which needs DNS, a plausible clock and relay
+ reachability, none of which hold that early in a boot.
+ .
+ Give the npub of a peer this machine should dial at boot. It should be an
+ always-on node with a public endpoint.
+ .
+ Leave this blank to use the FIPS public test mesh, which accepts inbound
+ peering from any npub. That is fine for trying the package out. Replace it
+ for a machine you rely on: if every configured peer has moved, this machine
+ becomes unreachable with no signal as to why, and the only recovery is
+ physical access to the console.
+ .
+ This is asked only when the configuration file does not already exist. It
+ never overwrites one you have edited.
+
+Template: fips-initramfs/peer-transport
+Type: string
+Default: udp
+Description: Bootstrap peer transport:
+ The FIPS transport used to dial the peer, normally udp. Other values are
+ tcp, tor and ethernet, though only udp and tcp make sense this early in a
+ boot.
+
+Template: fips-initramfs/peer-address
+Type: string
+Default:
+Description: Bootstrap peer address:
+ Where to dial the peer, as host:port. Either a hostname or a literal
+ address will do.
+ .
+ A hostname needs a resolver, which the initramfs gets from its DHCP lease.
+ A literal address needs none. If you have both, put them in the
+ configuration file afterwards as two entries with different priorities, the
+ way the shipped defaults do.
+ .
+ Ignored if no npub was given above.
+
+Template: fips-initramfs/ssh-key
+Type: string
+Default:
+Description: SSH public key that may unlock this machine:
+ Dropbear admits one or more public keys into the initramfs, and a session
+ opened with one of them unlocks the encrypted root. Without a key there is
+ no remote unlock at all, and this machine can only be unlocked at its
+ console.
+ .
+ Paste one public key, the whole line, as it appears in a .pub file. For
+ example: ssh-ed25519 AAAAC3Nza... you@host
+ .
+ It is written to /etc/dropbear/initramfs/authorized_keys, which belongs to
+ no package and is yours to edit afterwards. Add further keys there.
+ .
+ This is asked only when that file names no key yet. An existing key is
+ never overwritten.

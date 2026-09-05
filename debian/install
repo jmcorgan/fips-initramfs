@@ -1,0 +1,6 @@
+initramfs/hooks/fips-initramfs                usr/share/initramfs-tools/hooks
+initramfs/scripts/init-premount/a_fips        usr/share/initramfs-tools/scripts/init-premount
+initramfs/scripts/init-bottom/fips-initramfs  usr/share/initramfs-tools/scripts/init-bottom
+conf/fips-initramfs.conf                      etc/fips-initramfs
+conf/fips.yaml.example                        usr/share/fips-initramfs
+lib/functions                                 usr/share/fips-initramfs

@@ -1,0 +1,111 @@
+# Shared by the maintainer scripts and the initramfs hook. Sourced, not
+# executed.
+#
+# This file decides which pair of binaries the package uses:
+#
+#   - /usr/bin, when the fips package is installed. The node in the
+#     initramfs is then the same build as the daemon the booted system
+#     runs, which is why this is searched first.
+#
+#   - The private directory, which this package populates from a
+#     published FIPS release. It is what a machine uses when it runs no
+#     FIPS daemon of its own.
+#
+# FIPS_BINDIR in fips-initramfs.conf overrides both.
+#
+# The three paths below are overridable so this file can be exercised
+# outside an installed system. Nothing in the package sets them.
+
+FIPS_CONF="${FIPS_CONF:-/etc/fips-initramfs/fips-initramfs.conf}"
+FIPS_SYSTEM_BINDIR="${FIPS_SYSTEM_BINDIR:-/usr/bin}"
+FIPS_PRIVATE_BINDIR="${FIPS_PRIVATE_BINDIR:-/usr/lib/fips-initramfs/bin}"
+
+# Print the directory holding fips and fipsctl, or return 1.
+#
+# Both binaries must be in the same directory. The hook needs the daemon
+# and the maintainer scripts need fipsctl, and taking them from one
+# place is what keeps the daemon in the image and the address written
+# beside it in step.
+fips_bindir() {
+    _fib_want=""
+    if [ -r "$FIPS_CONF" ]; then
+        # shellcheck source=/dev/null
+        . "$FIPS_CONF"
+        _fib_want="${FIPS_BINDIR:-}"
+    fi
+
+    # An explicit setting replaces the search rather than extending it.
+    # A configured directory that turns out to be wrong is an error, not
+    # a reason to quietly use a different daemon.
+    if [ -n "$_fib_want" ]; then
+        if [ -x "$_fib_want/fips" ] && [ -x "$_fib_want/fipsctl" ]; then
+            printf '%s\n' "$_fib_want"
+            return 0
+        fi
+        return 1
+    fi
+
+    for _fib_dir in "$FIPS_SYSTEM_BINDIR" "$FIPS_PRIVATE_BINDIR"; do
+        if [ -x "$_fib_dir/fips" ] && [ -x "$_fib_dir/fipsctl" ]; then
+            printf '%s\n' "$_fib_dir"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Advice printed wherever the binaries cannot be found. Both layouts are
+# named, because either one may be what the reader intended.
+fips_bindir_advice() {
+    echo "fips-initramfs: neither $FIPS_SYSTEM_BINDIR nor $FIPS_PRIVATE_BINDIR"
+    echo "fips-initramfs: holds both fips and fipsctl. This package installs"
+    echo "fips-initramfs: them in the second, so reinstalling it restores them."
+    echo "fips-initramfs: FIPS_BINDIR in $FIPS_CONF overrides the search."
+}
+
+# Whether the image's authorized_keys should force cryptroot-unlock.
+#
+# The default is on. FIPS_FORCE_UNLOCK_COMMAND=no in fips-initramfs.conf
+# turns it off, which is what bring-up wants: a shell in the initramfs
+# is how a failed unlock gets diagnosed.
+fips_force_unlock() {
+    _ffu=yes
+    if [ -r "$FIPS_CONF" ]; then
+        # shellcheck source=/dev/null
+        . "$FIPS_CONF"
+        _ffu="${FIPS_FORCE_UNLOCK_COMMAND:-yes}"
+    fi
+    case "$_ffu" in
+        no|No|NO|false|False|FALSE|0) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# Where dropbear-initramfs looks for the keys allowed into the initramfs.
+# The file belongs to no package: dropbear-initramfs ships only
+# dropbear.conf and documents this one as the administrator's to create.
+FIPS_DROPBEAR_KEYS="${FIPS_DROPBEAR_KEYS:-/etc/dropbear/initramfs/authorized_keys}"
+
+# Whether a line is an SSH public key dropbear will accept.
+#
+# The pattern is the one dropbear's own initramfs hook validates with, so
+# a key this accepts is a key that hook will not warn about. An options
+# field before the key type is allowed, which is what lets an
+# administrator restrict a session further.
+fips_valid_ssh_key() {
+    printf '%s\n' "$1" | grep -qE \
+        '^([^#[:blank:]].* )?(ssh-(rsa|ed25519)|ecdsa-sha2-nistp(256|384|521)|sk-ssh-(ed25519|ecdsa-sha2-nistp256)@openssh\.com) '
+}
+
+# Whether the authorized_keys file already names a key.
+#
+# A file with only comments or blank lines counts as empty: it admits
+# nobody, and the question of which key may unlock this machine is still
+# open.
+fips_have_ssh_key() {
+    [ -f "$FIPS_DROPBEAR_KEYS" ] || return 1
+    while IFS= read -r _fhk_line || [ -n "$_fhk_line" ]; do
+        fips_valid_ssh_key "$_fhk_line" && return 0
+    done < "$FIPS_DROPBEAR_KEYS"
+    return 1
+}

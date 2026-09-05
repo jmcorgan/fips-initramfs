@@ -1,0 +1,267 @@
+# fips-initramfs
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-v0.1.0-green.svg)](#status)
+
+Unlock a LUKS encrypted root filesystem over a
+[FIPS](https://github.com/jmcorgan/fips) mesh, from anywhere, removing
+the need for local console access (but not replacing it).
+
+> Under active development and not yet released as a package. Built and
+> unlocked end to end on Debian 13 and Ubuntu 24.04. See [Status](#status).
+
+## What it does
+
+A Linux machine with an encrypted root stops during boot and waits for a
+passphrase. Answering that prompt remotely is what `dropbear-initramfs`
+is for, but it leaves you needing a route to the machine on the ordinary
+IP network: a static address or a DHCP reservation, a port open through
+whatever sits in front of it, and a way in that works before the machine
+has finished booting.
+
+This package puts a FIPS mesh node inside the initramfs and binds
+dropbear to the `fips0` interface it creates. The machine dials out to
+its bootstrap peers, so it needs no inbound reachability at all, and it
+comes up at the same mesh address on every boot, so you can write that
+address down at install time and use it for the life of the machine.
+
+**Console passphrase entry is never disabled.** Every failure in this
+path leaves the operator at the ordinary cryptsetup prompt, which is
+what makes it safe to install on a machine you can still reach.
+
+**The machine does not need FIPS installed**, and most machines running
+this will not have it. The package carries its own `fips` and `fipsctl`,
+and the node exists only inside the initramfs, for the length of the
+unlock. Nothing is left running once the real root is up.
+
+A machine that does run FIPS is equally fine, and there the two
+identities are separate and should stay that way.
+
+## Quick start
+
+**On the machine to be unlocked.** Build the package (see below), then:
+
+```bash
+sudo apt install ./fips-initramfs_0.1.0_amd64.deb
+```
+
+The `.deb` already carries `fips` and `fipsctl`. The build obtains the
+latest FIPS release and extracts the two binaries from it, checking them
+against the checksums that release publishes, so the install downloads
+nothing and needs no other package.
+
+The install asks two questions: the SSH public key allowed to unlock the
+machine, and a bootstrap peer. Leaving the peer blank keeps the FIPS
+public test mesh. What the peer prompt accepts, and what to edit
+afterwards for anything it cannot express, is in
+[debian/README.Debian](debian/README.Debian).
+
+It then prints the name to connect to. **Record it.** It is the only
+thing you need afterwards, and it does not change:
+
+```text
+fips-initramfs: unlock this node at npub1....fips
+```
+
+**On the machine you unlock from**, you need a running FIPS daemon
+connected to the public mesh, or to the mesh which contains the node you
+optionally configured to peer with. Then, once the machine under test
+has rebooted and is waiting:
+
+```bash
+ssh root@npub1....fips
+```
+
+That is the whole unlock. The key is forced to run `cryptroot-unlock`
+inside the image, so the session takes the passphrase and never opens a
+shell.
+
+It is recommended you create a host specific SSH client configuration
+file that contains the FIPS `npub.fips` address, the identity you
+configured, and the user specified as root:
+
+```text
+# ~/.ssh/config.d/unlock-server1
+Host unlock-server1
+    HostName npub1....fips
+    User root
+    IdentityFile ~/.ssh/id_ed25519_unlock
+    IdentitiesOnly yes
+```
+
+A file under `~/.ssh/config.d/` is read only if `~/.ssh/config` begins
+with `Include config.d/*`; without that line the file is ignored in
+silence. Putting the block straight into `~/.ssh/config` always works.
+
+`IdentitiesOnly` is there because ssh otherwise offers every key your
+agent holds before the one named here, and dropbear closes the
+connection once it has refused enough of them.
+
+The unlock is then `ssh unlock-server1`.
+
+In any case, always connect to the `<npub>.fips` address, not to the
+IPv6 address. This is required for the connecting FIPS node to properly
+resolve and establish the mesh connection.
+
+Before putting this on a machine that matters, read
+[Security considerations](#security-considerations).
+
+## Building from source
+
+```bash
+dpkg-buildpackage -us -uc -b
+```
+
+Needs `debhelper` at compatibility level 13, plus `curl` and
+`ca-certificates`: the build downloads the `fips` and `fipsctl` binaries
+from the latest FIPS release and verifies them against the checksums
+that release publishes. `FIPS_DEB` names a local file instead, for an
+offline build or a release candidate.
+
+Run the tests with `sh tests/hook-test.sh`, and likewise for
+`functions-test.sh` and `premount-test.sh`. They build no image, need no
+root and need no dropbear. Each skips with status 77 rather than failing
+when a prerequisite is absent.
+
+## How it works
+
+Three pieces, run by `initramfs-tools` at three different moments:
+
+- **A build-time hook** puts the daemon, its configuration and the
+  identity key into the generated image, and appends the node's address
+  to dropbear's options inside that image. It never fails the image
+  build: when something it needs is missing it warns and produces an
+  image with no FIPS node, because a hook that exits non-zero leaves
+  `initramfs-tools` half-configured and aborts the apt run it belonged
+  to.
+- **A premount script** starts the node, waits for `fips0` to get an
+  address, and **compares that address against the one written into the
+  image**. The comparison is the point. A FIPS daemon whose key is
+  missing generates a new identity and runs perfectly at the wrong
+  address, and a daemon whose TUN setup failed reports itself degraded
+  and keeps going. Neither is caught by asking whether the daemon is
+  alive.
+- **An init-bottom script** stops the node and removes the interface
+  before `switch_root`, so nothing from the initramfs survives into the
+  booted system.
+
+On a machine that also installs the `fips` package, the hook takes that
+package's binaries from `/usr/bin` in preference to the bundled ones, so
+the node in the initramfs is the same build as the daemon the booted
+system runs.
+
+**The identities stay separate either way.** The install generates a
+keypair under `/etc/fips-initramfs/` and leaves the host's
+`/etc/fips/fips.key` alone, so the machine answers to one npub while it
+waits for a passphrase and a different one once it has booted. That is
+deliberate: the initramfs key ships inside an unencrypted image on an
+unencrypted `/boot`, which is the exposure the encrypted root exists to
+avoid, so it should not also be the key that identifies the running
+machine on the mesh.
+
+## Project structure
+
+```text
+debian/       Source package: control, rules, maintainer scripts, README.Debian
+initramfs/    The three scripts: build-time hook, premount, init-bottom
+conf/         Node configuration example and the package's own conffile
+lib/          Shared shell functions, sourced by the hook and by postinst
+tests/        Three suites: hook, shared functions, premount
+```
+
+**[debian/README.Debian](debian/README.Debian) is the operator manual**,
+and it is longer than this file. It covers setting a machine up, the
+bootstrap peer prompt and the peer list, what the boot scripts check and
+what each warning means, script ordering, what the node adds to the
+image, the rebuild trigger, and removing against purging. It is where to
+look when a machine does not come back.
+
+## Status
+
+Built, installed and unlocked over the mesh on Debian 13.6 and Ubuntu
+24.04, against the public FIPS test mesh.
+
+**This is a Debian source package and targets `.deb`-based
+distributions only.** It is built as a `.deb`, it installs as one, and
+it hooks `initramfs-tools`, `dropbear-initramfs` and
+`cryptsetup-initramfs`, none of which exist outside that family. Nothing
+about the idea is Debian-specific, though, and **a port to another
+distribution that encrypts its root with LUKS would be welcome**: what
+would have to be rewritten is the packaging and the interface to the
+initramfs generator, not the design. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+**Targets Debian 12 and 13 and Ubuntu 22.04, 24.04 and 26.04.** Linux is
+not one target even within that family: each distribution assembles the
+initramfs with its own tooling and its own busybox, and a fault in this
+package is normally specific to one of them.
+
+|                           | Debian 12 | Debian 13 | Ubuntu 22.04 | Ubuntu 24.04 | Ubuntu 26.04 |
+|---------------------------|:---------:|:---------:|:------------:|:------------:|:------------:|
+| `dropbear-initramfs`      |  2022.83  |  2025.89  |   2020.81    |   2022.83    |   2025.89    |
+| Commands the scripts need |    ✅     |    ✅     |      ✅      |      ✅      |      ✅      |
+| Installs, boots, unlocks  |     —     |    ✅     |      —       |      ✅      |      —       |
+
+**A dash means not yet exercised, not known-broken.** The two rows are
+covered differently. **Commands the scripts need** is checked by a
+script that builds an initramfs in a container per distribution, so all
+five are covered in one run. **Installs, boots, unlocks** needs a booted
+machine with an encrypted root, which nothing automates yet, so its two
+ticks are the manually tested ones so far. No CI runs either of them on
+a change; building that is the next substantial piece of work.
+
+**Installs, boots, unlocks** means the package was installed on a
+machine with an encrypted root, the machine came up, was reached over
+the mesh, and unlocked with nothing typed on its console, with the
+address in the console output matching the one the install reported.
+
+Not yet exercised: a kernel upgrade regenerating the image, `dpkg -r`
+against `dpkg -P`, and any architecture other than amd64.
+
+**FIPS 0.5.0 or later is required**, which is where `fipsctl address`
+first shipped. Nothing mechanically couples the two projects, and the
+FIPS configuration schema is not yet stable, so a much newer FIPS may
+meet a schema break at boot.
+
+## Security considerations
+
+**The initramfs image is not encrypted, and the node's private key is in
+it.** That is the whole point of the design: the node has to come up
+before anything is decrypted. `/boot` is readable by anyone with the
+disk, so treat the initramfs identity as compromised the moment the
+machine is physically taken. It grants what any mesh identity grants,
+which is why it must not be the same key that identifies the running
+machine (see [How it works](#how-it-works)).
+
+**This does not change what an unencrypted `/boot` already meant.**
+Anyone who can write to it could already replace the kernel or the
+initramfs on a machine with no verified boot. This package adds a key to
+what is exposed there; it does not create the exposure.
+
+**The unlock key is authorised to unlock and to do nothing else.** The
+hook prepends `command="/usr/bin/cryptroot-unlock"` to each key in the
+image's `authorized_keys`, so a session takes the passphrase and never
+reaches a shell. **One exception**: a key line that already carries
+options is left exactly as written, because it expresses an intent of
+your own that prepending to could defeat. If you write your own options,
+you own the restriction.
+
+**The passphrase leaves your machine.** Unlocking remotely means sending
+the LUKS passphrase over the network, which typing it at the console
+never does. Two layers carry it: the SSH session to dropbear, and FIPS's
+own encryption between your node and the target npub. Check dropbear's
+host key the first time you connect, so that something else answering at
+that name cannot collect the passphrase.
+
+**Anyone who knows the npub can reach the node.** It sits on the mesh
+with dropbear listening, and the authorised key is what stands between
+that and an unlock. Use a key reserved for this, not a general-purpose
+one.
+
+**Console entry always remains.** Physical access to the console unlocks
+the machine with the passphrase exactly as it did before, and no failure
+in this path can take that away.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

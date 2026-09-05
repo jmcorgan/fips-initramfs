@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# Boot-time bottom: stop the FIPS node and remove its interface before
+# switch_root.
+#
+# PREREQ names dropbear so the SSH session closes before the transport
+# that carries it disappears. Unlike the premount case this is a declared
+# dependency and is honoured.
+#
+# Anything still running here holds a reference to the initramfs across
+# switch_root. The daemon proper starts under systemd afterwards, and may
+# use an identity different from this one.
+
+PREREQ="dropbear"
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+    ;;
+esac
+
+. /scripts/functions
+
+PIDFILE=/run/fips.pid
+IFACE=fips0
+# Five seconds, in whole-second steps, for the same reason as the
+# premount wait. The daemon drains its peers with a two-second timeout,
+# so a healthy exit lands well inside this.
+SHUTDOWN_ITERATIONS=5
+SHUTDOWN_INTERVAL=1
+
+pid=$(cat "$PIDFILE" 2>/dev/null) || pid=""
+
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    log_begin_msg "Stopping the FIPS node"
+    kill -TERM "$pid" 2>/dev/null || true
+
+    # The daemon drains its peers before it exits. Waiting for the exit
+    # keeps the interface deletion below from racing a live data path.
+    i=0
+    while [ "$i" -lt "$SHUTDOWN_ITERATIONS" ] && kill -0 "$pid" 2>/dev/null; do
+        sleep "$SHUTDOWN_INTERVAL"
+        i=$((i + 1))
+    done
+
+    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+    log_end_msg
+fi
+
+ip link del "$IFACE" 2>/dev/null || true
+rm -f "$PIDFILE"
+
+exit 0
