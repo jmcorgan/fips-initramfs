@@ -1,0 +1,63 @@
+name: container
+
+# The level a container can hold: the build, the debconf answers, the
+# identity generation, the image the hook produces, and the three test
+# suites. It cannot boot anything, so it cannot catch what only a booted
+# machine shows; that half runs elsewhere and is not gated here.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck lib/functions tests/*.sh ci/*.sh \
+              debian/config debian/postinst debian/postrm debian/fetch-fips-deb.sh \
+              initramfs/hooks/fips-initramfs \
+              initramfs/scripts/init-premount/a_fips \
+              initramfs/scripts/init-bottom/fips-initramfs
+      - name: markdownlint
+        run: |
+          npm install -g markdownlint-cli
+          markdownlint '**/*.md'
+
+  container:
+    # Linux is not one target here. Each distribution assembles the
+    # initramfs with its own tooling and its own busybox, and this
+    # package's defects have been per-distribution every time.
+    strategy:
+      fail-fast: false
+      matrix:
+        distro:
+          - debian:12
+          - debian:13
+          - ubuntu:22.04
+          - ubuntu:24.04
+          - ubuntu:26.04
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.distro }}
+      # The build installs packages and the install writes to /etc and
+      # /boot, so this runs as root inside the container. That is what
+      # ci/container-test.sh expects.
+      options: --user root
+    steps:
+      # actions/checkout needs git, which these images do not carry.
+      - name: install git
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates
+      - uses: actions/checkout@v4
+      - name: build, install and inspect
+        run: ci/container-test.sh
