@@ -104,6 +104,25 @@ fi
 DAEMON="$bindir/fips"
 FIPSCTL="$bindir/fipsctl"
 
+# The daemon has to be able to run on this machine, and that is not
+# implied by it being installed. The bundled binaries come from a FIPS
+# release built on some other distribution, and a release built against a
+# newer C library will not start on an older one.
+#
+# Nothing else notices. fipsctl needs older symbols than the daemon does,
+# so the install generates an identity and derives an address, the image
+# builds, and the first sign of trouble is a machine that boots to its
+# console prompt saying the interface never came up. Measured on Debian
+# 12, whose glibc is 2.36 against the daemon's 2.39, and on Ubuntu 22.04
+# at 2.35.
+if ! "$DAEMON" --version >/dev/null 2>&1; then
+    warn "$DAEMON cannot run on this system:"
+    "$DAEMON" --version 2>&1 | sed -n '1,3p' | while IFS= read -r _line; do
+        warn "  $_line"
+    done
+    skip "the bundled FIPS daemon does not run here."
+fi
+
 [ -f "$CONFDIR/fips.key" ] || skip "$CONFDIR/fips.key is missing; reinstall the package to generate one."
 
 # Derive the address from the public key, so the private key is not read

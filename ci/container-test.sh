@@ -113,6 +113,27 @@ else
     exit 1
 fi
 
+# Whether the daemon this release bundles can actually run here. A FIPS
+# release built against a newer C library installs cleanly, generates an
+# identity and builds an image, and then fails to start at boot with
+# nothing pointing at the cause. Debian 12 ships glibc 2.36 and Ubuntu
+# 22.04 ships 2.35, against a daemon built for 2.39.
+bundled_daemon=debian/fips-initramfs/usr/lib/fips-initramfs/bin/fips
+daemon_runs=no
+if [ ! -x "$bundled_daemon" ]; then
+    bad "the bundled FIPS daemon is in the built tree"
+elif "$bundled_daemon" --version >/dev/null 2>&1; then
+    daemon_runs=yes
+    ok "the bundled FIPS daemon runs on this distribution"
+else
+    # Not a failure of this package. The release was built elsewhere and
+    # needs a newer C library than this distribution ships. What IS this
+    # package's business is behaving correctly about it, which is what
+    # the image checks below assert instead.
+    ok "the bundled FIPS daemon does not run here, so degradation is what is tested"
+    "$bundled_daemon" --version 2>&1 | sed -n '1,2p' | sed 's/^/     /'
+fi
+
 fipsver=$(cat usr/share/fips-initramfs/fips-version 2>/dev/null \
     || cat debian/fips-initramfs/usr/share/fips-initramfs/fips-version 2>/dev/null || echo unknown)
 echo "     bundled FIPS version: $fipsver"
@@ -154,8 +175,24 @@ inspect_image() {
 
     find_in_image() { find "$WORK/x" -path "*/$1" \( -type f -o -type l \) 2>/dev/null | head -1; }
 
-    for want in usr/bin/fips etc/fips/fips.yaml etc/fips/fips.key etc/fips/mesh-address \
-                scripts/init-premount/a_fips scripts/init-bottom/fips-initramfs; do
+    # The boot scripts ship either way; the node does not.
+    for want in scripts/init-premount/a_fips scripts/init-bottom/fips-initramfs; do
+        check "$label: image carries $want" [ -n "$(find_in_image "$want")" ]
+    done
+
+    if [ "$daemon_runs" = no ]; then
+        # The designed behaviour where the daemon cannot run: the hook
+        # warns, leaves the node out, and lets the build finish, so the
+        # machine boots to its console prompt rather than to a node that
+        # cannot start. Assert that rather than the node being present.
+        check "$label: no daemon in the image, which is correct here" \
+            [ -z "$(find_in_image usr/bin/fips)" ]
+        check "$label: no identity key left in the image" \
+            [ -z "$(find_in_image etc/fips/fips.key)" ]
+        return 0
+    fi
+
+    for want in usr/bin/fips etc/fips/fips.yaml etc/fips/fips.key etc/fips/mesh-address; do
         check "$label: image carries $want" [ -n "$(find_in_image "$want")" ]
     done
 

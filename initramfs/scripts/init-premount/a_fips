@@ -93,8 +93,28 @@ done
 # reason the wait is bounded.
 if [ -z "$address" ]; then
     fips_warn "$IFACE has no global address after the wait; remote unlock is unavailable."
-    fips_warn "Check $LOGFILE from a console shell. A daemon that runs without"
-    fips_warn "an interface means tun.enabled is false or the tun module is absent."
+    fips_warn "A daemon that runs without an interface means tun.enabled is"
+    fips_warn "false or the tun module is absent."
+    # Print the daemon's own last words rather than telling someone to go
+    # and read them. The advice this replaced was to open $LOGFILE from a
+    # console shell, which is not reachable: this path leaves the machine
+    # at the passphrase prompt with no shell, and on a remote machine
+    # there is no console to use anyway. Bounded, because the console is
+    # the only output this script has and a daemon that failed at startup
+    # says so in a few lines.
+    if [ -s "$LOGFILE" ]; then
+        # The first lines, not the last, and deliberately: a daemon that
+        # fails at startup says why in its opening lines, and reaching
+        # for tail here would risk exactly the fault that produced this
+        # script's sed above. tail is no more guaranteed than head.
+        fips_warn "the first lines of $LOGFILE follow:"
+        sed -n '1,10p' "$LOGFILE" 2>/dev/null \
+            | while IFS= read -r _line; do
+                  fips_warn "  $_line"
+              done
+    else
+        fips_warn "$LOGFILE is empty; the daemon wrote nothing at all."
+    fi
 elif [ -z "$expected" ]; then
     fips_warn "no expected address in the image; cannot check the identity."
     fips_warn "$IFACE came up at $address."
