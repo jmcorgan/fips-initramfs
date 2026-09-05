@@ -20,6 +20,13 @@
 #   FIPS_DEB    use this file instead of downloading anything
 #   FIPS_TAG    fetch this release rather than the latest
 #   FIPS_REPO   default jmcorgan/fips
+#   GITHUB_TOKEN or GH_TOKEN
+#               sent as a bearer token when asking the API which release
+#               is latest. Optional, and only affects the rate limit:
+#               unauthenticated calls are counted per source address, so
+#               a shared address runs out. Observed on a GitHub-hosted
+#               runner, where five parallel jobs asking at once got a 403
+#               while the same build passed minutes earlier.
 
 set -eu
 
@@ -59,7 +66,13 @@ if [ -z "$tag" ]; then
     api="https://api.github.com/repos/$REPO/releases/latest"
     # No jq on a plain Debian build machine, so the field is read with
     # sed. The tr splits a single-line response into one field per line.
-    tag=$(curl -sSfL "$api" | tr ',' '\n' \
+    # An unauthenticated call is rate limited by source address, so pass
+    # a token when there is one. Nothing here needs the token's
+    # permissions; the repository is public.
+    auth=""
+    token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    [ -n "$token" ] && auth="Authorization: Bearer $token"
+    tag=$(curl -sSfL ${auth:+-H "$auth"} "$api" | tr ',' '\n' \
         | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
         | head -1)
     [ -n "$tag" ] || die "could not read the latest release tag from $api."

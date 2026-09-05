@@ -60,4 +60,10 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates
       - uses: actions/checkout@v7
       - name: build, install and inspect
+        # The build asks the GitHub API which FIPS release is latest.
+        # Unauthenticated calls are rate limited per source address, and
+        # hosted runners share theirs, so five parallel jobs can exhaust
+        # it: ubuntu:26.04 failed with a 403 while the other four passed.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ci/container-test.sh
