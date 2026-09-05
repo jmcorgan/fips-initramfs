@@ -28,7 +28,7 @@ jobs:
         run: |
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git ca-certificates
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # A release must pin the FIPS version it bundles. fetch-fips-deb.sh
       # takes the latest release by default and vendor/ is gitignored, so
@@ -63,7 +63,7 @@ jobs:
           } > out/BUILD-INFO.txt
           cat out/BUILD-INFO.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fips-initramfs-deb
           path: out/
