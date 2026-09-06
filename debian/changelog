@@ -1,3 +1,9 @@
+fips-initramfs (0.1.1) UNRELEASED; urgency=medium
+
+  * Nothing yet.
+
+ -- Johnathan Corgan <johnathan@corganlabs.com>  Sun, 06 Sep 2026 23:20:57 +0000
+
 fips-initramfs (0.1.0) unstable; urgency=medium
 
   * Initial release. Starts a FIPS mesh node in the initramfs and binds

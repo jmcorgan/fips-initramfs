@@ -36,16 +36,23 @@ identities are separate and should stay that way.
 
 ## Quick start
 
-**On the machine to be unlocked.** Build the package (see below), then:
+**On the machine to be unlocked.** Download the `.deb` from the
+[latest release](https://github.com/jmcorgan/fips-initramfs/releases/latest)
+and install it:
 
 ```bash
+curl -sSfLO https://github.com/jmcorgan/fips-initramfs/releases/download/v0.1.0/fips-initramfs_0.1.0_amd64.deb
 sudo apt install ./fips-initramfs_0.1.0_amd64.deb
 ```
 
-The `.deb` already carries `fips` and `fipsctl`. The build obtains the
-latest FIPS release and extracts the two binaries from it, checking them
-against the checksums that release publishes, so the install downloads
-nothing and needs no other package.
+The release also carries `SHA256SUMS`, and
+[Building from source](#building-from-source) covers building it yourself
+instead.
+
+The `.deb` already carries `fips` and `fipsctl`, taken from a published
+FIPS release at build time and checked against the checksums that release
+publishes, so the install downloads nothing else and needs no other
+package.
 
 The install asks two questions: the SSH public key allowed to unlock the
 machine, and a bootstrap peer. Leaving the peer blank keeps the FIPS
@@ -105,8 +112,10 @@ Before putting this on a machine that matters, read
 
 ## Building from source
 
-The build produces one file, `fips-initramfs_0.1.0_amd64.deb`, and that
-file is what you install. Two things it needs either way: a Debian or
+The build produces one `.deb`, and that file is what you install. Its
+version comes from `debian/changelog`, so a build of the trunk is a
+development version ahead of the last release; a build of a release tag
+carries that release's version. Two things it needs either way: a Debian or
 Ubuntu system, and network access, because the build downloads `fips`
 and `fipsctl` from a published FIPS release and verifies them against
 the checksums that release publishes.
@@ -129,7 +138,7 @@ dpkg-buildpackage -us -uc -b
 The package lands one directory up. Install it with:
 
 ```bash
-sudo apt install ../fips-initramfs_0.1.0_amd64.deb
+sudo apt install ../fips-initramfs_*_amd64.deb
 ```
 
 ### In a container, leaving the host alone
@@ -178,7 +187,7 @@ sha256 as the `.deb` attached to the release. So a package you built
 yourself can be checked against the `SHA256SUMS` on the release page:
 
 ```bash
-sha256sum fips-initramfs_0.1.0_amd64.deb
+sha256sum fips-initramfs_0.1.0_amd64.deb   # compare with SHA256SUMS
 ```
 
 Build from a modified working tree and it will not match, which is the
