@@ -123,6 +123,13 @@ Run the tests with `sh tests/hook-test.sh`, and likewise for
 root and need no dropbear. Each skips with status 77 rather than failing
 when a prerequisite is absent.
 
+`ci/run-local.sh` goes further, in a container per distribution: it
+builds the package, installs it, generates an identity, builds an image
+and reads what the hook put in it, then runs those three suites. It
+needs docker and takes a few minutes per distribution. Name one to run
+just that one, as `ci/run-local.sh debian:13`, and set `FIPS_DEB` to
+test against an unpublished FIPS build.
+
 ## How it works
 
 Three pieces, run by `initramfs-tools` at three different moments:
@@ -200,28 +207,41 @@ package is normally specific to one of them.
 |---------------------------|:---------:|:---------:|:------------:|:------------:|:------------:|
 | `dropbear-initramfs`      |  2022.83  |  2025.89  |   2020.81    |   2022.83    |   2025.89    |
 | Commands the scripts need |    ✅     |    ✅     |      ✅      |      ✅      |      ✅      |
-| Installs, boots, unlocks  |     —     |    ✅     |      —       |      ✅      |      —       |
-
-**A dash means not yet exercised, not known-broken.** The two rows are
-covered differently. **Commands the scripts need** is checked by a
-script that builds an initramfs in a container per distribution, so all
-five are covered in one run. **Installs, boots, unlocks** needs a booted
-machine with an encrypted root, which nothing automates yet, so its two
-ticks are the manually tested ones so far. No CI runs either of them on
-a change; building that is the next substantial piece of work.
+| Builds, installs, images  |    ✅     |    ✅     |      ✅      |      ✅      |      ✅      |
+| Installs, boots, unlocks  |    ✅†    |    ✅     |      ✅†     |      ✅      |      ✅      |
 
 **Installs, boots, unlocks** means the package was installed on a
 machine with an encrypted root, the machine came up, was reached over
 the mesh, and unlocked with nothing typed on its console, with the
 address in the console output matching the one the install reported.
+All five were exercised that way on 2026-09-06.
+
+**† Debian 12 and Ubuntu 22.04 need a FIPS build for an older glibc than
+0.5.0 carries.** The `fips` daemon in the 0.5.0 release needs glibc
+2.39; those two ship 2.36 and 2.35, so it installs there and cannot
+start. The package notices and says so at image-build time rather than
+at boot, leaving an image with no node so console unlock still works.
+Their ticks above were measured against a later FIPS build whose
+binaries need only 2.34. On 0.5.0 itself both fall back to the console.
+
+The rows are covered differently, and only the first two are automated.
+**Commands the scripts need** and **builds, installs, images** are
+checked by `ci/container-test.sh`, which builds the package, installs it
+both ways the debconf prompt allows and reads what the hook put in the
+image. GitHub Actions runs it on every push, one distribution per job,
+and `ci/run-local.sh` drives the same script across five containers on a
+development machine. **Installs, boots, unlocks** needs a booted machine
+with an encrypted root reaching a live mesh, which no hosted runner can
+provide, so it is run outside CI and no check gates it.
 
 Not yet exercised: a kernel upgrade regenerating the image, `dpkg -r`
 against `dpkg -P`, and any architecture other than amd64.
 
 **FIPS 0.5.0 or later is required**, which is where `fipsctl address`
-first shipped. Nothing mechanically couples the two projects, and the
-FIPS configuration schema is not yet stable, so a much newer FIPS may
-meet a schema break at boot.
+first shipped, and on Debian 12 and Ubuntu 22.04 a build newer than
+0.5.0 for the reason above. Nothing mechanically couples the two
+projects, and the FIPS configuration schema is not yet stable, so a much
+newer FIPS may meet a schema break at boot.
 
 ## Security considerations
 

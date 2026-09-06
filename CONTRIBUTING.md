@@ -39,11 +39,26 @@ sh tests/premount-test.sh
 The build needs `debhelper` at compatibility level 13, plus `curl` and
 `ca-certificates`, because it downloads the FIPS release it takes `fips`
 and `fipsctl` from. `FIPS_DEB` names a local file instead, for an
-offline build.
+offline build or to test a FIPS release before it is published.
 
 The three suites need a shell and little else. Each skips with status 77
 rather than failing when a prerequisite is missing, so a skip is not a
 pass: read what it said.
+
+`ci/run-local.sh` is the wider check, and it is the same script CI runs.
+In a container per distribution it builds the package from the declared
+`Build-Depends`, installs it both ways the debconf prompt allows,
+generates an identity, builds an initramfs and reads what the hook put
+in it, then runs the three suites. It needs docker, and a distribution
+can be named to run just that one:
+
+```bash
+ci/run-local.sh
+ci/run-local.sh debian:13
+```
+
+Set `FIPS_DEB` to a local `.deb` to build against an unpublished FIPS
+release rather than the latest published one.
 
 ## Reporting bugs
 
@@ -86,12 +101,22 @@ dpkg-buildpackage -us -uc -b
 markdownlint '**/*.md'
 ```
 
-**There is no CI yet.** Nothing automated will catch a regression on a
-distribution you did not try, so more of that burden sits with you than
-it would elsewhere. Say in the pull request which distributions you
-exercised and how far you got: building the package, building an image,
-or booting and unlocking a real machine. "Not tested on Ubuntu" is a
-useful thing to write. A confident silence is not.
+Or run `ci/run-local.sh`, which does the build and the suites in each
+of the five distributions rather than only in yours.
+
+**CI covers everything except booting a machine.** GitHub Actions runs
+`ci/container-test.sh` on every push, one job per distribution, so a
+build or packaging regression on a distribution you did not try will be
+caught. What no CI reaches is the unlock itself: it needs a booted
+machine with an encrypted root talking to a live mesh, which hosted
+runners cannot provide, so those runs happen outside CI and no check
+gates them.
+
+That is the part where the burden sits with you. Say in the pull request
+which distributions you exercised and how far you got: building the
+package, building an image, or booting and unlocking a real machine.
+"Not tested on Ubuntu" is a useful thing to write. A confident silence
+is not.
 
 ### Changing the boot scripts
 
