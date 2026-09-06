@@ -9,6 +9,8 @@
 #
 # Usage: ci/run-local.sh [distribution ...]
 #        ci/run-local.sh debian:12          # just one
+#   FIPS_DEB  a FIPS .deb to build against instead of the latest
+#             published release, for testing a release candidate
 
 set -eu
 
@@ -16,6 +18,21 @@ SRC=$(cd "$(dirname "$0")/.." && pwd)
 DISTROS=${*:-"debian:12 debian:13 ubuntu:22.04 ubuntu:24.04 ubuntu:26.04"}
 
 command -v docker >/dev/null || { echo "docker is needed to run this" >&2; exit 2; }
+
+# A candidate FIPS .deb is mounted into each container and named to the
+# build through FIPS_DEB, which debian/fetch-fips-deb.sh honours in place
+# of downloading. Without this the build reaches GitHub for the latest
+# published release, so a run meant to test a candidate would quietly
+# test something else and pass. The extra docker arguments are held in
+# the positional parameters, which are free once DISTROS has been read.
+if [ -n "${FIPS_DEB:-}" ]; then
+    [ -f "$FIPS_DEB" ] || { echo "FIPS_DEB=$FIPS_DEB does not exist" >&2; exit 2; }
+    candidate=$(cd "$(dirname "$FIPS_DEB")" && pwd)/$(basename "$FIPS_DEB")
+    echo "building against $candidate rather than the latest release"
+    set -- -v "$candidate:/candidate.deb:ro" -e FIPS_DEB=/candidate.deb
+else
+    set --
+fi
 
 logdir=$(mktemp -d)
 echo "logs in $logdir"
@@ -28,7 +45,7 @@ for image in $DISTROS; do
     # The tree is copied rather than bind-mounted, because the build
     # writes into it and its artifacts land one directory up. A container
     # writing into the working tree would leave the host's copy dirty.
-    if docker run --rm -v "$SRC:/src:ro" "$image" \
+    if docker run --rm -v "$SRC:/src:ro" "$@" "$image" \
             sh -c 'cp -a /src /work && cd /work && ci/container-test.sh' \
             > "$log" 2>&1; then
         echo "PASS"
