@@ -1,6 +1,6 @@
 # fips-initramfs v0.1.0
 
-**Released**: unreleased
+**Released**: 2026-09-06
 
 v0.1.0 is the first release of `fips-initramfs`. It unlocks a LUKS encrypted
 root filesystem over a [FIPS](https://github.com/jmcorgan/fips) mesh, so a

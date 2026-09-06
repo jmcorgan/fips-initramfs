@@ -28,4 +28,4 @@ fips-initramfs (0.1.0) unstable; urgency=medium
     shipped at /usr/share/doc/fips-initramfs/CHANGELOG.md.gz. This file
     carries only what is specific to the Debian packaging.
 
- -- Johnathan Corgan <johnathan@corganlabs.com>  Tue, 01 Sep 2026 07:35:06 +0000
+ -- Johnathan Corgan <johnathan@corganlabs.com>  Sun, 06 Sep 2026 22:37:46 +0000

@@ -11,7 +11,7 @@ get its own heading beside it rather than being folded in. `debian/changelog` is
 the Debian-specific view of the same releases and is what an installed machine
 carries.
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-09-06
 
 Initial release. The package puts a FIPS mesh node inside the initramfs and
 binds dropbear to the `fips0` interface it creates, so a LUKS encrypted root
