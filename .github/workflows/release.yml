@@ -64,8 +64,18 @@ jobs:
           FIPS_TAG: ${{ steps.pin.outputs.fips_tag }}
           DEBIAN_FRONTEND: noninteractive
         run: |
-          apt-get install -y -qq build-essential debhelper dpkg-dev fakeroot \
-              curl ca-certificates lintian
+          # The build dependencies come from debian/control rather than a
+          # list written here. A hand-written list drifts the moment the
+          # declaration changes, and it drifts silently: this job shipped
+          # without libdbus-1-3 after that was added for the Debian 12
+          # build, and the first tag push failed at dpkg-checkbuilddeps.
+          apt-get install -y -qq build-essential dpkg-dev fakeroot \
+              devscripts equivs lintian
+          mk-build-deps --install --remove \
+              --tool "apt-get -y -qq --no-install-recommends" debian/control
+          # Nothing below is reached if the declaration is unsatisfied, so
+          # a missing dependency fails here rather than mid-build.
+          dpkg-checkbuilddeps
           dpkg-buildpackage -us -uc -b
           mkdir -p out && mv ../fips-initramfs_*.deb out/
           cd out && sha256sum ./*.deb > SHA256SUMS

@@ -39,6 +39,19 @@ override_dh_auto_install:
 override_dh_strip:
 override_dh_dwz:
 
+# CHANGELOG.md ships in the package, and it cannot go in debian/docs.
+# dh_installdocs would copy it into the doc directory, and
+# dh_installchangelogs then renames any changelog-shaped file it finds
+# there to "changelog". This is a native package, so that name is already
+# the Debian changelog's: the shipped changelog.gz became CHANGELOG.md and
+# debian/changelog was absent from the package entirely. Measured on
+# Debian 13 with debhelper 13.24.2. Installing it after
+# dh_installchangelogs has run leaves both files intact.
+override_dh_installchangelogs:
+	dh_installchangelogs
+	install -p -m0644 CHANGELOG.md \
+	    debian/fips-initramfs/usr/share/doc/fips-initramfs/CHANGELOG.md
+
 # There is deliberately no debian/triggers. dh_installinitramfs sees the
 # files this package ships under /usr/share/initramfs-tools and adds
 # "activate-noawait update-initramfs" itself; declaring it again produces

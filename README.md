@@ -105,27 +105,102 @@ Before putting this on a machine that matters, read
 
 ## Building from source
 
+The build produces one file, `fips-initramfs_0.1.0_amd64.deb`, and that
+file is what you install. Two things it needs either way: a Debian or
+Ubuntu system, and network access, because the build downloads `fips`
+and `fipsctl` from a published FIPS release and verifies them against
+the checksums that release publishes.
+
+### On a Debian or Ubuntu machine
+
 ```bash
+git clone https://github.com/jmcorgan/fips-initramfs
+cd fips-initramfs
+
+# Install exactly what debian/control declares, rather than a list
+# copied out of it that can fall behind.
+sudo apt install build-essential devscripts equivs
+sudo mk-build-deps --install --remove \
+    --tool "apt-get -y --no-install-recommends" debian/control
+
 dpkg-buildpackage -us -uc -b
 ```
 
-Needs `debhelper` at compatibility level 13, plus `curl` and
-`ca-certificates`: the build downloads the `fips` and `fipsctl` binaries
-from the latest FIPS release and verifies them against the checksums
-that release publishes. `FIPS_DEB` names a local file instead, for an
-offline build or a release candidate.
+The package lands one directory up. Install it with:
 
-Run the tests with `sh tests/hook-test.sh`, and likewise for
-`functions-test.sh` and `premount-test.sh`. They build no image, need no
-root and need no dropbear. Each skips with status 77 rather than failing
-when a prerequisite is absent.
+```bash
+sudo apt install ../fips-initramfs_0.1.0_amd64.deb
+```
 
-`ci/run-local.sh` goes further, in a container per distribution: it
-builds the package, installs it, generates an identity, builds an image
-and reads what the hook put in it, then runs those three suites. It
-needs docker and takes a few minutes per distribution. Name one to run
-just that one, as `ci/run-local.sh debian:13`, and set `FIPS_DEB` to
-test against an unpublished FIPS build.
+### In a container, leaving the host alone
+
+Same file, in `out/`, with no build tools installed on the machine you
+run it from:
+
+```bash
+mkdir -p out
+docker run --rm -v "$PWD:/src:ro" -v "$PWD/out:/out" debian:13 sh -c '
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq build-essential devscripts equivs
+    cp -a /src /work && cd /work
+    mk-build-deps --install --remove \
+        --tool "apt-get -y -qq --no-install-recommends" debian/control
+    dpkg-buildpackage -us -uc -b
+    cp ../fips-initramfs_*.deb /out/'
+```
+
+The source tree is mounted read only and copied inside the container,
+because the build writes into it and leaves its artifacts one directory
+up. The `.deb` is written to `out/` owned by root.
+
+### Which FIPS release ends up in the package
+
+The latest published one by default, and **0.5.1 is the floor**: the
+build refuses anything older, because the daemon in 0.5.0 cannot start
+on Debian 12 or Ubuntu 22.04. Two variables change that:
+
+- `FIPS_TAG=v0.5.1` bundles that release rather than the latest.
+- `FIPS_DEB=/path/to/fips_x.y.z_amd64.deb` uses a local file and
+  downloads nothing, for an offline build or to try a release candidate.
+
+The built package records what it took in
+`/usr/share/fips-initramfs/fips-version`, and a release also states it in
+the `BUILD-INFO.txt` attached alongside the `.deb`.
+
+### Checking a build against the released file
+
+**A build from a clean checkout of a tag reproduces the file published
+for that tag.** Measured for v0.1.0: a fresh clone checked out at
+`v0.1.0` and built with the container recipe above produced the same
+sha256 as the `.deb` attached to the release. So a package you built
+yourself can be checked against the `SHA256SUMS` on the release page:
+
+```bash
+sha256sum fips-initramfs_0.1.0_amd64.deb
+```
+
+Build from a modified working tree and it will not match, which is the
+point of saying "clean checkout" rather than "the source".
+
+### Running the tests
+
+```bash
+sh tests/hook-test.sh      # and functions-test.sh, premount-test.sh
+```
+
+They build no image, need no root and need no dropbear, and each skips
+with status 77 rather than failing when a prerequisite is absent.
+
+`ci/run-local.sh` runs a fuller check in a container per distribution:
+it builds the package, installs it, generates an identity, builds an
+image and reads what the hook put in it, then runs those three suites.
+It needs docker and takes a few minutes per distribution. Name one to
+run just that one, as `ci/run-local.sh debian:13`. **It is a test runner
+and not a way to obtain a package**: each container is discarded when it
+finishes, and the `.deb` it builds goes with it. Use one of the two
+recipes above to get a file you can install.
 
 ## How it works
 
