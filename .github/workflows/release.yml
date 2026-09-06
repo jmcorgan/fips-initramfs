@@ -1,6 +1,6 @@
 name: release
 
-# Builds the package for a tag and attaches it to the release.
+# Builds the package for a tag and attaches it to the GitHub release.
 #
 # The boot test is NOT here and cannot be: it needs a booted machine with
 # an encrypted root reaching a live mesh, which no hosted runner provides.
@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
     inputs:
       fips_tag:
-        description: 'FIPS release tag to bundle, e.g. v0.5.0'
-        required: true
+        description: 'FIPS release tag to bundle. Defaults to debian/fips-tag'
+        required: false
 
 permissions:
   contents: write
@@ -34,17 +34,34 @@ jobs:
       # takes the latest release by default and vendor/ is gitignored, so
       # without a pin two builds of one tag can carry different binaries
       # and nothing records which shipped.
-      - name: check the FIPS tag is pinned
+      #
+      # The pin comes from debian/fips-tag, which is part of the commit
+      # being tagged. A workflow_dispatch input overrides it, for a build
+      # that deliberately differs from what the tree records. Nothing
+      # supplies it on a tag push except the file, which is why the file
+      # exists: this job used to require an input that only
+      # workflow_dispatch could provide, so every tag push failed here.
+      - name: resolve the FIPS pin
+        id: pin
         run: |
-          if [ -z "${{ inputs.fips_tag }}" ] && [ -z "$FIPS_TAG" ]; then
-            echo "FIPS_TAG is not set. A release build must pin the FIPS" >&2
-            echo "release it bundles; see debian/fetch-fips-deb.sh." >&2
+          tag="${{ inputs.fips_tag }}"
+          if [ -z "$tag" ] && [ -f debian/fips-tag ]; then
+            # awk rather than tr: deleting all whitespace would join a
+            # second line to the first and yield a tag that exists nowhere.
+            tag=$(sed 's/#.*//' debian/fips-tag | awk 'NF {print $1; exit}')
+          fi
+          if [ -z "$tag" ]; then
+            echo "No FIPS pin. A release build must pin the FIPS release it" >&2
+            echo "bundles: put the tag in debian/fips-tag, or pass fips_tag" >&2
+            echo "to a manual run. See debian/fetch-fips-deb.sh." >&2
             exit 1
           fi
+          echo "fips_tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "pinning FIPS $tag"
 
       - name: build
         env:
-          FIPS_TAG: ${{ inputs.fips_tag }}
+          FIPS_TAG: ${{ steps.pin.outputs.fips_tag }}
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get install -y -qq build-essential debhelper dpkg-dev fakeroot \
@@ -67,3 +84,47 @@ jobs:
         with:
           name: fips-initramfs-deb
           path: out/
+
+      # Attach the build to the release the tag names. A tag push does not
+      # create a release on its own, so the release is created if it is not
+      # there yet and left alone if it is: a release drafted by hand with
+      # its notes already written must not be overwritten by this job.
+      #
+      # It is deliberately not marked latest here. That is the manual boot
+      # gate's decision and no CI can make it; see the release checklist.
+      - name: attach the build to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const tag = context.ref.replace('refs/tags/', '');
+            const { owner, repo } = context.repo;
+
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag(
+                { owner, repo, tag })).data;
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              release = (await github.rest.repos.createRelease({
+                owner, repo, tag_name: tag, name: tag,
+                draft: true, make_latest: 'false',
+              })).data;
+              core.info(`created draft release ${tag}`);
+            }
+
+            for (const name of fs.readdirSync('out')) {
+              // Re-running the job must not fail on an asset it already
+              // uploaded, and must not leave the stale one in place.
+              const existing = release.assets.find(a => a.name === name);
+              if (existing) {
+                await github.rest.repos.deleteReleaseAsset(
+                  { owner, repo, asset_id: existing.id });
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: release.id, name,
+                data: fs.readFileSync(`out/${name}`),
+              });
+              core.info(`uploaded ${name}`);
+            }

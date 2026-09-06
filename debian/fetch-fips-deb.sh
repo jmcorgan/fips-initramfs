@@ -18,7 +18,9 @@
 #
 # Usage: debian/fetch-fips-deb.sh [architecture]
 #   FIPS_DEB    use this file instead of downloading anything
-#   FIPS_TAG    fetch this release rather than the latest
+#   FIPS_TAG    fetch this release rather than the latest. A release
+#               build sets it from debian/fips-tag, which is the pin the
+#               tagged commit carries; an ordinary build takes the latest
 #   FIPS_REPO   default jmcorgan/fips
 #   GITHUB_TOKEN or GH_TOKEN
 #               sent as a bearer token when asking the API which release

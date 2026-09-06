@@ -1,0 +1,14 @@
+# The FIPS release this package bundles when it is built for a release.
+#
+# A release must pin the FIPS version it carries: debian/fetch-fips-deb.sh
+# takes the latest release when FIPS_TAG is unset, and vendor/ is not in
+# git, so without a pin two builds of one tag can carry different binaries
+# and nothing records which shipped.
+#
+# The pin lives here rather than being typed at build time so that it is
+# part of the commit that gets tagged, reviewed with the rest of the
+# release, and reproducible afterwards. .github/workflows/release.yml
+# reads it; an ordinary build still takes the latest release.
+#
+# One tag, on its own line. Blank lines and # comments are ignored.
+v0.5.0
