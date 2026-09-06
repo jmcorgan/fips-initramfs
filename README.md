@@ -7,9 +7,6 @@ Unlock a LUKS encrypted root filesystem over a
 [FIPS](https://github.com/jmcorgan/fips) mesh, from anywhere, removing
 the need for local console access (but not replacing it).
 
-> Under active development and not yet released as a package. Built and
-> unlocked end to end on Debian 13 and Ubuntu 24.04. See [Status](#status).
-
 ## What it does
 
 A Linux machine with an encrypted root stops during boot and waits for a
@@ -185,8 +182,8 @@ look when a machine does not come back.
 
 ## Status
 
-Built, installed and unlocked over the mesh on Debian 13.6 and Ubuntu
-24.04, against the public FIPS test mesh.
+Built, installed and unlocked over the mesh on all five distributions,
+against the public FIPS test mesh.
 
 **This is a Debian source package and targets `.deb`-based
 distributions only.** It is built as a `.deb`, it installs as one, and
@@ -208,7 +205,7 @@ package is normally specific to one of them.
 | `dropbear-initramfs`      |  2022.83  |  2025.89  |   2020.81    |   2022.83    |   2025.89    |
 | Commands the scripts need |    ✅     |    ✅     |      ✅      |      ✅      |      ✅      |
 | Builds, installs, images  |    ✅     |    ✅     |      ✅      |      ✅      |      ✅      |
-| Installs, boots, unlocks  |    ✅†    |    ✅     |      ✅†     |      ✅      |      ✅      |
+| Installs, boots, unlocks  |    ✅     |    ✅     |      ✅      |      ✅      |      ✅      |
 
 **Installs, boots, unlocks** means the package was installed on a
 machine with an encrypted root, the machine came up, was reached over
@@ -216,13 +213,12 @@ the mesh, and unlocked with nothing typed on its console, with the
 address in the console output matching the one the install reported.
 All five were exercised that way on 2026-09-06.
 
-**† Debian 12 and Ubuntu 22.04 need a FIPS build for an older glibc than
-0.5.0 carries.** The `fips` daemon in the 0.5.0 release needs glibc
-2.39; those two ship 2.36 and 2.35, so it installs there and cannot
-start. The package notices and says so at image-build time rather than
-at boot, leaving an image with no node so console unlock still works.
-Their ticks above were measured against a later FIPS build whose
-binaries need only 2.34. On 0.5.0 itself both fall back to the console.
+**All five run the bundled daemon**, which is what FIPS 0.5.1 changed.
+Its binaries need glibc 2.34, and the oldest distribution here is Ubuntu
+22.04 at 2.35. The 0.5.0 daemon needed 2.39 and so could not start on
+Debian 12 or Ubuntu 22.04; the package noticed at image-build time and
+left an image with no node, so console unlock still worked. That is why
+0.5.1 is the floor.
 
 The rows are covered differently, and only the first two are automated.
 **Commands the scripts need** and **builds, installs, images** are
@@ -237,11 +233,12 @@ provide, so it is run outside CI and no check gates it.
 Not yet exercised: a kernel upgrade regenerating the image, `dpkg -r`
 against `dpkg -P`, and any architecture other than amd64.
 
-**FIPS 0.5.0 or later is required**, which is where `fipsctl address`
-first shipped, and on Debian 12 and Ubuntu 22.04 a build newer than
-0.5.0 for the reason above. Nothing mechanically couples the two
-projects, and the FIPS configuration schema is not yet stable, so a much
-newer FIPS may meet a schema break at boot.
+**FIPS 0.5.1 or later is required**, and the build refuses anything
+below it. Two things put the floor there: `fipsctl address`, which the
+install needs and which first shipped in 0.5.0, and the glibc 2.34
+requirement above, which arrived in 0.5.1. Nothing mechanically couples
+the two projects, and the FIPS configuration schema is not yet stable,
+so a much newer FIPS may meet a schema break at boot.
 
 ## Security considerations
 

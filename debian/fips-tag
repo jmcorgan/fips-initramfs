@@ -11,4 +11,4 @@
 # reads it; an ordinary build still takes the latest release.
 #
 # One tag, on its own line. Blank lines and # comments are ignored.
-v0.5.0
+v0.5.1

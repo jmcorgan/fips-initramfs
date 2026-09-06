@@ -9,9 +9,17 @@
 # as the daemon, and this package needs no Rust toolchain to build.
 #
 # The download is verified against the release's own checksums file. A
-# release older than the floor below is refused, because its fipsctl has
-# no offline address command and the image build would then decline to
-# include a node at all.
+# release older than the floor below is refused. Two separate reasons put
+# the floor where it is, and the newer one is what holds it there now:
+# 0.5.0 is the first release whose fipsctl has the offline address
+# command, without which the image build declines to include a node at
+# all, and 0.5.1 is the first whose daemon runs on every distribution
+# this package claims. 0.5.0's daemon needs glibc 2.39, so on Debian 12
+# and Ubuntu 22.04 it installs and cannot start.
+#
+# The floor is a tested floor and moves by hand, after someone re-runs
+# the boot test. Note that the FIPS_DEB path below returns before this
+# comparison, so testing a candidate never exercises the floor.
 #
 # Writes vendor/fips_<version>_<arch>.deb and vendor/fips-version, and
 # does nothing when a verified file is already there.
@@ -33,7 +41,7 @@
 set -eu
 
 REPO="${FIPS_REPO:-jmcorgan/fips}"
-FLOOR=0.5.0
+FLOOR=0.5.1
 ARCH="${1:-$(dpkg-architecture -qDEB_HOST_ARCH)}"
 TOP=$(cd "$(dirname "$0")/.." && pwd)
 VENDOR="$TOP/vendor"
@@ -82,7 +90,7 @@ fi
 version="${tag#v}"
 
 dpkg --compare-versions "$version" ge "$FLOOR" \
-    || die "release $tag is older than $FLOOR, whose fipsctl first had the offline address command."
+    || die "release $tag is older than $FLOOR, the oldest release whose daemon runs on every distribution this package claims."
 
 deb="fips_${version}_${ARCH}.deb"
 target="$VENDOR/$deb"
