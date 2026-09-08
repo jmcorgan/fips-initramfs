@@ -250,12 +250,20 @@ machine on the mesh.
 ## Project structure
 
 ```text
+docs/         Platform-neutral: what any implementation has to do
+conf/         Node configuration example, shared, and the package's own conffile
 debian/       Source package: control, rules, maintainer scripts, README.Debian
 initramfs/    The three scripts: build-time hook, premount, init-bottom
-conf/         Node configuration example and the package's own conffile
 lib/          Shared shell functions, sourced by the hook and by postinst
 tests/        Three suites: hook, shared functions, premount
 ```
+
+[docs/porting.md](docs/porting.md) is the one part of this tree that is
+not about `.deb` at all. It states the design as a contract — what goes
+into the image, the address comparison, the failure policy, what is per
+host and must be configurable — so that a port to another initramfs
+generator has something to be checked against rather than a package to
+be read.
 
 **[debian/README.Debian](debian/README.Debian) is the operator manual**,
 and it is longer than this file. It covers setting a machine up, the
@@ -277,7 +285,8 @@ about the idea is Debian-specific, though, and **a port to another
 distribution that encrypts its root with LUKS would be welcome**: what
 would have to be rewritten is the packaging and the interface to the
 initramfs generator, not the design. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[docs/porting.md](docs/porting.md), which is the contract a second
+implementation has to meet, and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Targets Debian 12 and 13 and Ubuntu 22.04, 24.04 and 26.04.** Linux is
 not one target even within that family: each distribution assembles the
