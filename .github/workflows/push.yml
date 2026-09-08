@@ -32,6 +32,26 @@ jobs:
           npm install -g markdownlint-cli
           markdownlint '**/*.md'
 
+  nixos:
+    # The NixOS module is a second implementation and not a second packaging,
+    # so nothing in the container matrix below touches it. What a runner can
+    # do is evaluate it, which catches an option type error or a stale NixOS
+    # interface. It is not a boot, and the unlock still has to be exercised on
+    # a real machine, exactly as for the .deb.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: evaluate the example configuration
+        # --no-update-lock-file so a stale nixos/flake.lock is a visible
+        # failure rather than something the run silently works around.
+        run: |
+          nix eval --no-update-lock-file \
+              ./nixos#nixosConfigurations.example.config.system.build.toplevel.drvPath
+
   container:
     # Linux is not one target here. Each distribution assembles the
     # initramfs with its own tooling and its own busybox, and this

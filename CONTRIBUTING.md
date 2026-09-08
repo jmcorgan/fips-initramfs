@@ -11,10 +11,12 @@ console, and a mistake strands a machine at a prompt nobody is standing
 in front of. The boot scripts print what they did for that reason, and
 a change that makes them quieter is a change for the worse.
 
-**This project is `.deb`-only, and that is a packaging boundary rather
-than a design one.** It is built and installed as a Debian package and
-it hooks `initramfs-tools`, `dropbear-initramfs` and
-`cryptsetup-initramfs`. Ports are welcome; see below.
+**The packaging is not the design.** The `.deb` is built and installed
+as a Debian package and hooks `initramfs-tools`, `dropbear-initramfs`
+and `cryptsetup-initramfs`; the NixOS module under [nixos/](nixos/)
+shares none of that machinery and implements the same thing.
+[docs/porting.md](docs/porting.md) is what they have in common and is
+the thing to read first. Further ports are welcome; see below.
 
 **Linux is not one target.** Even within that family, each distribution
 assembles the initramfs
@@ -104,6 +106,13 @@ markdownlint '**/*.md'
 Or run `ci/run-local.sh`, which does the build and the suites in each
 of the five distributions rather than only in yours.
 
+For a change under `nixos/`, none of that applies and this does:
+
+```bash
+nix eval ./nixos#nixosConfigurations.example.config.system.build.toplevel.drvPath
+markdownlint '**/*.md'
+```
+
 **CI covers everything except booting a machine.** GitHub Actions runs
 `ci/container-test.sh` on every push, one job per distribution, so a
 build or packaging regression on a distribution you did not try will be
@@ -136,6 +145,34 @@ distribution matrix bites.
   with no FIPS node. A hook that fails leaves `initramfs-tools`
   half-configured and aborts the apt run it belonged to, which is worse
   than the fault it was reporting.
+
+### Changing the NixOS module
+
+[nixos/](nixos/) is a second implementation, not a second packaging of
+the first, and the same rules apply to it in NixOS terms.
+
+- **Check it evaluates**, which is what CI does and is the whole of what
+  CI can do here:
+
+  ```bash
+  nix eval ./nixos#nixosConfigurations.example.config.system.build.toplevel.drvPath
+  nix fmt   # nixfmt, if you have it
+  ```
+
+- **Nothing in stage 1 may fail the boot.** The build-time checks are
+  assertions, because refusing the switch stops the fault at the machine
+  you are standing at. Boot-time checks warn and continue, exactly as the
+  `.deb`'s do, because that path ends at the console passphrase prompt.
+- **An option with no safe default gets no default**, and an assertion
+  saying what goes wrong when it is unset. The names in
+  `ethernetInterfaces` and `wifi.interface` fail silently when wrong,
+  which is the failure mode worth spending an assertion on.
+- **The address comparison is not optional.** See
+  [docs/porting.md](docs/porting.md); a port that keeps the daemon and
+  drops the comparison has kept the easy half.
+
+Evaluation is not a boot. Say in the pull request whether you booted a
+machine and unlocked it, and on which NixOS release.
 
 ### Bug-fix pull requests
 

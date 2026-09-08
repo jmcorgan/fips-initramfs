@@ -36,6 +36,10 @@ identities are separate and should stay that way.
 
 ## Quick start
 
+**On NixOS**, none of this section applies: there is no `.deb` to
+install and the module is the whole of it. Go to
+[nixos/README.md](nixos/README.md).
+
 **On the machine to be unlocked.** Download the `.deb` from the
 [latest release](https://github.com/jmcorgan/fips-initramfs/releases/latest)
 and install it:
@@ -256,6 +260,7 @@ debian/       Source package: control, rules, maintainer scripts, README.Debian
 initramfs/    The three scripts: build-time hook, premount, init-bottom
 lib/          Shared shell functions, sourced by the hook and by postinst
 tests/        Three suites: hook, shared functions, premount
+nixos/        The NixOS module, its flake and its operator manual
 ```
 
 [docs/porting.md](docs/porting.md) is the one part of this tree that is
@@ -277,16 +282,28 @@ look when a machine does not come back.
 Built, installed and unlocked over the mesh on all five distributions,
 against the public FIPS test mesh.
 
-**This is a Debian source package and targets `.deb`-based
-distributions only.** It is built as a `.deb`, it installs as one, and
-it hooks `initramfs-tools`, `dropbear-initramfs` and
-`cryptsetup-initramfs`, none of which exist outside that family. Nothing
-about the idea is Debian-specific, though, and **a port to another
-distribution that encrypts its root with LUKS would be welcome**: what
-would have to be rewritten is the packaging and the interface to the
-initramfs generator, not the design. See
-[docs/porting.md](docs/porting.md), which is the contract a second
-implementation has to meet, and [CONTRIBUTING.md](CONTRIBUTING.md).
+**Two implementations, at different stages.** The `.deb` is the one
+with a release, a distribution matrix and CI behind it. The NixOS module
+in [nixos/](nixos/) is newer, and its own
+[README](nixos/README.md#status) says what has and has not been
+exercised. They share [docs/porting.md](docs/porting.md), which is the
+contract, and `conf/fips.yaml.example`, and nothing else: a NixOS
+machine installs no `.deb` and a Debian machine evaluates no Nix.
+
+| | `.deb` | NixOS |
+| --- | --- | --- |
+| Targets | Debian 12, 13; Ubuntu 22.04, 24.04, 26.04 | NixOS with systemd stage 1 |
+| Image generator | `initramfs-tools` hook | a NixOS module |
+| SSH server | `dropbear-initramfs` | OpenSSH, via `boot.initrd.network.ssh` |
+| Install | `apt install ./fips-initramfs_*.deb` | a flake input and a module |
+| CI | build, install and image, per distribution | evaluation of the example configuration |
+| Booted and unlocked | all five distributions | yes, before the module was generalised |
+
+**A port to any other distribution that encrypts its root with LUKS is
+welcome**, and what has to be rewritten is the packaging and the
+interface to the initramfs generator, not the design. Start from
+[docs/porting.md](docs/porting.md) and
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Targets Debian 12 and 13 and Ubuntu 22.04, 24.04 and 26.04.** Linux is
 not one target even within that family: each distribution assembles the
