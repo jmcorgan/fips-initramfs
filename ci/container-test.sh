@@ -239,7 +239,7 @@ inspect_image() {
     # reads the image rather than busybox --list, because on Ubuntu
     # modprobe is absent from the applet list and present here anyway.
     missing=""
-    for cmd in ip sed cat sleep kill rm modprobe; do
+    for cmd in ip sed cat sleep kill rm readlink modprobe; do
         [ -n "$(find_in_image "bin/$cmd")" ] || [ -n "$(find_in_image "sbin/$cmd")" ] \
             || missing="$missing $cmd"
     done
@@ -286,7 +286,7 @@ section "test suites"
 FIPSCTL=$(command -v fipsctl || echo /usr/lib/fips-initramfs/bin/fipsctl)
 export FIPSCTL
 check "a fipsctl is available to the suites: $FIPSCTL" [ -x "$FIPSCTL" ]
-for t in hook-test functions-test premount-test; do
+for t in hook-test functions-test premount-test init-bottom-test; do
     if sh "tests/$t.sh" > "$WORK/$t.log" 2>&1; then
         ok "tests/$t.sh"
     elif [ $? = 77 ]; then

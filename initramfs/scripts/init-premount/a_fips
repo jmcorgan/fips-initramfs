@@ -30,6 +30,13 @@ NPUB_FILE=/etc/fips/mesh-npub
 PIDFILE=/run/fips.pid
 LOGFILE=/run/fips.log
 IFACE=fips0
+NET_PIDFILE=/run/fips-network.pid
+NET_LOGFILE=/run/fips-network.log
+DROPBEAR_PIDFILE=/run/dropbear.pid
+
+# Seconds between attempts at the network when one fails at once, as it
+# does with no network device, so the retry cannot spin.
+NET_RETRY_INTERVAL=10
 
 # Twenty seconds, in whole-second steps. A fractional sleep would work
 # here, because dropbear-initramfs forces BUSYBOX=y through its
@@ -63,11 +70,94 @@ current_address() {
         | sed -n '1p'
 }
 
+# Whether any attempt at configure_networking has succeeded.
+#
+# initramfs-tools writes one of these files for each interface it
+# configures, and tests for the same files itself to decide it is done.
+network_configured() {
+    for _nc_file in /run/net-*.conf /run/net6-*.conf; do
+        [ -e "$_nc_file" ] && return 0
+    done
+    return 1
+}
+
+# Wait for dropbear's boot script to finish its one attempt at the network.
+#
+# That script runs configure_networking and then execs dropbear in the same
+# process, so the process's executable becomes dropbear exactly when the
+# attempt is over. Its init-bottom script watches for the same change. The
+# process name cannot be used instead: the boot script is itself a file
+# called dropbear, so the name reads dropbear before the exec as well.
+# readlink is dropbear's own requirement, since its init-bottom script
+# cannot run without it, and it is a busybox applet on all five
+# distributions.
+#
+# The pid file cannot exist yet when this starts: dropbear's script sorts
+# after this one and has not run. It is waited for, and after a minute with
+# no file dropbear is taken to be absent.
+wait_for_dropbear_attempt() {
+    _wd_exe=$(readlink -f /sbin/dropbear 2>/dev/null) || return 0
+    _wd_i=0
+    while [ ! -s "$DROPBEAR_PIDFILE" ]; do
+        [ "$_wd_i" -lt 60 ] || return 0
+        sleep 1
+        _wd_i=$((_wd_i + 1))
+    done
+    _wd_pid=$(cat "$DROPBEAR_PIDFILE" 2>/dev/null) || return 0
+    while _wd_now=$(readlink -f "/proc/$_wd_pid/exe" 2>/dev/null); do
+        [ "$_wd_now" != "$_wd_exe" ] || return 0
+        sleep 5
+    done
+}
+
+# Keep trying to bring the network up until it comes.
+#
+# initramfs-tools gives up on DHCP after 265 to 300 seconds and does not try
+# again, so without this a cable plugged in after that never gets a network
+# and remote unlock stays unavailable until the next boot. Each attempt runs
+# in its own subshell because configure_networking keeps state in shell
+# variables, and a second call in the same shell would start from what the
+# first one left. Its output goes to a file: on a text console it would
+# otherwise be written over the passphrase prompt every few minutes.
+network_retry() {
+    wait_for_dropbear_attempt
+    while ! network_configured; do
+        ( configure_networking )
+        network_configured || sleep "$NET_RETRY_INTERVAL"
+    done
+}
+
 modprobe tun || fips_warn "modprobe tun failed; the node will come up with no interface."
 
-# The dropbear boot script calls this too, in the background. Calling it
-# here is what makes the transport usable before the node starts.
-configure_networking
+# The network is not configured in the foreground here. dropbear's boot
+# script makes the first attempt in the background, and this script only
+# retries once that attempt has failed.
+#
+# This script used to call configure_networking in the foreground, and
+# premount scripts run one at a time, so the console passphrase prompt
+# waited for it. With no network link that meant waiting for DHCP to give
+# up, four and a half to five minutes depending on the release, and three
+# more if no network device exists at all. A machine with its cable
+# unplugged looked hung.
+#
+# The node does not need the network in order to start. Its UDP socket
+# binds the wildcard address, fips0 takes its address from the identity,
+# and an auto-connect peer that cannot be reached yet is retried without
+# limit, so the node joins the mesh whenever a link comes up.
+#
+# No retry is started when the kernel command line turns networking off,
+# or for an NFS root, where dropbear's script configures the network in the
+# foreground before anything else runs. init-bottom stops the retry.
+case "${IP-}" in
+    none|off)
+        ;;
+    *)
+        if [ "${BOOT-}" != nfs ]; then
+            network_retry </dev/null >>"$NET_LOGFILE" 2>&1 &
+            echo $! > "$NET_PIDFILE"
+        fi
+        ;;
+esac
 
 log_begin_msg "Starting the FIPS node"
 /usr/bin/fips --config "$CONFIG" >"$LOGFILE" 2>&1 &

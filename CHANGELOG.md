@@ -13,7 +13,27 @@ carries.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+#### Initramfs
+
+- The console passphrase prompt no longer waits for the network. The premount
+  script configured the network in the foreground, so a machine booted with no
+  network link sat at a blank screen for four to eight minutes while DHCP timed
+  out. The network is now brought up in the background by dropbear's own boot
+  script, and the prompt appears at once.
+- A network link that comes up late in boot still gives remote unlock.
+  initramfs-tools stops trying DHCP after four and a half to five minutes, so
+  the premount script now keeps retrying in the background until a network comes
+  up, and init-bottom stops the retry when the disk is unlocked at the console.
+
+### Changed
+
+#### Initramfs
+
+- With a network present, remote unlock now becomes available about ten to
+  fifteen seconds later than before. The node starts before DHCP completes, so
+  its first attempt to reach its peers fails and it waits to retry.
 
 ## [0.1.0] - 2026-09-06
 

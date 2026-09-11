@@ -35,6 +35,52 @@ IFACE=fips0
 # so a healthy exit lands well inside this.
 SHUTDOWN_ITERATIONS=5
 SHUTDOWN_INTERVAL=1
+NET_PIDFILE=/run/fips-network.pid
+
+# The pids of a process's direct children.
+#
+# The fields of /proc/<pid>/stat begin pid, command in parentheses, state,
+# parent pid. dropbear's own init-bottom script finds its SSH sessions from
+# the same fields with sed, which every image carries; ps is not assumed.
+children() {
+    sed -n "s/^\([0-9]*\) (.*) . $1 .*/\1/p" /proc/[0-9]*/stat 2>/dev/null
+}
+
+# Stop a process and everything below it, parents first, so that no
+# process can start another child after its own children have been listed.
+stop_tree() {
+    kill -STOP "$1" 2>/dev/null || return 0
+    for _st_child in $(children "$1"); do
+        stop_tree "$_st_child"
+    done
+}
+
+# Kill a stopped tree, children first. A killed parent's children pass to
+# init at once and can no longer be found as its children, so killing
+# parents first leaves the rest of the tree stopped and alive.
+kill_tree() {
+    for _kt_child in $(children "$1"); do
+        kill_tree "$_kt_child"
+    done
+    kill -KILL "$1" 2>/dev/null
+}
+
+# Stop the premount script's network retry, if it is still running.
+#
+# It is still running only if no attempt has brought the network up, which
+# means the disk was unlocked at the console. The attempt in progress is
+# dhcpcd or ipconfig in a subshell of the retry, and ipconfig ignores TERM,
+# so the whole tree is stopped and then killed rather than asked to exit.
+# Left alone it would keep configuring interfaces from the discarded
+# initramfs after the real system has started.
+netpid=$(cat "$NET_PIDFILE" 2>/dev/null) || netpid=""
+if [ -n "$netpid" ] && kill -0 "$netpid" 2>/dev/null; then
+    log_begin_msg "Stopping the network retry"
+    stop_tree "$netpid"
+    kill_tree "$netpid"
+    log_end_msg
+fi
+rm -f "$NET_PIDFILE"
 
 pid=$(cat "$PIDFILE" 2>/dev/null) || pid=""
 
