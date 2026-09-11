@@ -150,13 +150,23 @@ so the test cannot drift from what actually boots.
 
 **A port to any distribution that encrypts its root with LUKS is
 welcome.** Nothing about the idea needs `.deb`: a mesh node started
-early enough for dropbear to bind to it, and torn down before the real
-root takes over, is a shape any initramfs can hold.
+early enough for an SSH server to bind to it, and torn down before the
+real root takes over, is a shape any initramfs can hold.
+
+**[docs/porting.md](docs/porting.md) is the contract.** It states the
+design independently of `initramfs-tools` and of dpkg: what goes into
+the image and under which names, why the identity has to be persistent
+and separate from the host's, the address comparison and the two
+failures it exists to catch, the failure policy that keeps console entry
+alive, and what is per host and therefore has to be configurable. Read
+it before the packaging, and check a port against it rather than against
+this tree.
 
 What would have to be rewritten is the packaging and the interface to
 the initramfs generator. Fedora, RHEL and SUSE use dracut; Arch uses
-mkinitcpio; each has its own idea of a hook, its own ordering mechanism
-and its own way of shipping a file into the image.
+mkinitcpio; NixOS builds the image from a module and runs systemd in
+stage 1. Each has its own idea of a hook, its own ordering mechanism and
+its own way of shipping a file into the image.
 
 What should carry over largely intact is the part worth having: start
 the node, wait for its address, **compare that address against the one

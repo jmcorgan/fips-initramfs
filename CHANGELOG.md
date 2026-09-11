@@ -13,7 +13,24 @@ carries.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+#### Documentation
+
+- `docs/porting.md`, which states the design as a contract a second
+  implementation can be checked against: the three moments an image
+  generator has to express, what goes into the image and under which names,
+  why the node identity must be persistent and separate from the host's, the
+  address comparison and the two failures it catches, the failure policy that
+  keeps console passphrase entry alive, teardown before the pivot, and the
+  settings that are per host and therefore cannot be defaulted.
+
+### Changed
+
+#### Documentation
+
+- `README.md` and `CONTRIBUTING.md` point at that contract where they
+  previously described a port only in prose.
 
 ## [0.1.1] - 2026-09-11
 
