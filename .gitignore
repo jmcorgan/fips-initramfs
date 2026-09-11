@@ -10,3 +10,7 @@
 # The FIPS release .deb the build takes its binaries from, and the
 # checksums it is verified against. Downloaded by debian/fetch-fips-deb.sh.
 /vendor/
+
+# Nix build products from the module under nixos/.
+/nixos/result
+/nixos/result-*

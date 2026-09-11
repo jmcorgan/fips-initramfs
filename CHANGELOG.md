@@ -13,7 +13,55 @@ carries.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+#### NixOS
+
+- A NixOS module under `nixos/`, with its own flake, an example host
+  configuration and an operator manual. It implements the contract in
+  `docs/porting.md` with a systemd stage 1: the daemon runs as
+  `fips-mesh.service` ordered before `cryptsetup-pre.target`, sshd is the one
+  `boot.initrd.network.ssh` provides, and the identity is injected through
+  `boot.initrd.secrets` from a directory outside the flake, so the Nix store
+  never holds a copy of the private key.
+- `fips-mesh-check.service`, which makes the address comparison on the NixOS
+  side. It derives the expected address in the initrd from the public key
+  beside the private one, rather than from a value written into the image at
+  build time, which is not available there: the identity lives outside the Nix
+  store and evaluation never sees it. Deriving it also catches a public key
+  that does not match the private key next to it.
+- The unlock restriction is root's login shell, which lands an SSH session on
+  systemd's password agent and nothing else.
+  `services.fips.initrd.debug.sshShell` is the analogue of
+  `FIPS_FORCE_UNLOCK_COMMAND=no` for bring-up, and warns while it is on.
+- Options for the settings that are per host and fail silently when wrong:
+  `ethernetInterfaces`, `wifi.interface`, `wifi.ssid` and
+  `networkKernelModules`, each with an assertion or a documented consequence.
+
+#### Initramfs
+
+- `conf/fips.yaml.example` carries a commented ethernet transport block. The
+  transport speaks L2 and so needs no lease, route or resolver, which suits
+  early boot, but it needs an interface name and those are per machine.
+
+#### Documentation
+
+- `docs/porting.md`, which states the design as a contract a second
+  implementation can be checked against: the three moments an image
+  generator has to express, what goes into the image and under which names,
+  why the node identity must be persistent and separate from the host's, the
+  address comparison and the two failures it catches, the failure policy that
+  keeps console passphrase entry alive, teardown before the pivot, and the
+  settings that are per host and therefore cannot be defaulted.
+
+### Changed
+
+#### Documentation
+
+- `README.md` and `CONTRIBUTING.md` point at that contract where they
+  previously described a port only in prose, and describe two
+  implementations where they previously described the project as
+  `.deb`-only.
 
 ## [0.1.1] - 2026-09-11
 

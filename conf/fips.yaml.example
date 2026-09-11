@@ -43,6 +43,31 @@ transports:
   udp:
     bind_addr: "0.0.0.0:2121"
 
+  # The ethernet transport speaks L2 directly, so it needs no lease, no route
+  # and no resolver, all of which early boot is bad at. It reaches only the
+  # local broadcast domain, which makes it a complement to the udp transport
+  # above rather than a replacement: udp is what reaches the bootstrap peers.
+  #
+  # It is commented out because it needs an interface name, and interface names
+  # are per machine. Getting one wrong is silent: the daemon binds nothing and
+  # the transport simply is not there. `ip -o link` on the machine lists them,
+  # and the initramfs uses the same names the booted system does.
+  #
+  # One entry per wired port, each with its own name, so each gets its own
+  # socket and neighbour state. beacon_interval_secs is deliberately short: the
+  # daemon starts before the links are up, so the first beacon always fails
+  # with ENETDOWN, and at the default interval the next one lands after the
+  # initramfs is gone.
+  #
+  # ethernet:
+  #   lan0:
+  #     interface: "enp1s0"
+  #     listen: true
+  #     announce: true
+  #     auto_connect: true
+  #     accept_connections: true
+  #     beacon_interval_secs: 2
+
 # Static peers only. Nostr-mediated rendezvous needs DNS, a plausible
 # wall clock and relay reachability, none of which hold this early in
 # boot; it is off unless configured, so this file simply omits it.
