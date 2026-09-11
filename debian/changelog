@@ -1,8 +1,28 @@
-fips-initramfs (0.1.1) UNRELEASED; urgency=medium
+fips-initramfs (0.1.1) unstable; urgency=medium
 
-  * Nothing yet.
+  * The init-premount script a_fips no longer calls configure_networking
+    in the foreground. With no network link, the console passphrase
+    prompt waited for DHCP to time out, four and a half to five minutes
+    depending on the distribution, and up to three minutes more when no
+    network device existed. dropbear-initramfs already configures the
+    network in the background, and its attempt now comes first.
+  * a_fips retries configure_networking in the background once
+    dropbear-initramfs's attempt has failed, until a network comes up,
+    logging to /run/fips-network.log. initramfs-tools makes one set of
+    DHCP attempts and stops, so without this a link that came up after
+    about five minutes never got a network. The init-bottom script
+    fips-initramfs stops a retry still running after a console unlock.
+  * With a network present, remote unlock becomes available about 10 to
+    15 seconds later than in 0.1.0, because the node now starts before
+    DHCP completes and retries its first connection to its peers.
+  * Upgrading regenerates the initramfs through the initramfs-tools
+    trigger, so nothing is done by hand. a_fips is not a conffile, so dpkg
+    replaces a copy edited to remove the call.
+  * The bundled FIPS release is unchanged at 0.5.1.
+  * The full list of changes in this release is in the project changelog,
+    shipped at /usr/share/doc/fips-initramfs/CHANGELOG.md.gz.
 
- -- Johnathan Corgan <johnathan@corganlabs.com>  Sun, 06 Sep 2026 23:20:57 +0000
+ -- Johnathan Corgan <johnathan@corganlabs.com>  Fri, 11 Sep 2026 14:06:12 +0000
 
 fips-initramfs (0.1.0) unstable; urgency=medium
 

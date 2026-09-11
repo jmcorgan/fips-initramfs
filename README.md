@@ -1,7 +1,7 @@
 # fips-initramfs
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-v0.1.0-green.svg)](#status)
+[![Status](https://img.shields.io/badge/status-v0.1.1-green.svg)](#status)
 
 Unlock a LUKS encrypted root filesystem over a
 [FIPS](https://github.com/jmcorgan/fips) mesh, from anywhere, removing
@@ -41,8 +41,8 @@ identities are separate and should stay that way.
 and install it:
 
 ```bash
-curl -sSfLO https://github.com/jmcorgan/fips-initramfs/releases/download/v0.1.0/fips-initramfs_0.1.0_amd64.deb
-sudo apt install ./fips-initramfs_0.1.0_amd64.deb
+curl -sSfLO https://github.com/jmcorgan/fips-initramfs/releases/download/v0.1.1/fips-initramfs_0.1.1_amd64.deb
+sudo apt install ./fips-initramfs_0.1.1_amd64.deb
 ```
 
 The release also carries `SHA256SUMS`, and
@@ -295,7 +295,7 @@ package is normally specific to one of them.
 machine with an encrypted root, the machine came up, was reached over
 the mesh, and unlocked with nothing typed on its console, with the
 address in the console output matching the one the install reported.
-All five were exercised that way on 2026-09-06.
+All five were exercised that way on 2026-09-11, for v0.1.1.
 
 **All five run the bundled daemon**, which is what FIPS 0.5.1 changed.
 Its binaries need glibc 2.34, and the oldest distribution here is Ubuntu

@@ -13,19 +13,27 @@ carries.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.1] - 2026-09-11
+
 ### Fixed
 
 #### Initramfs
 
 - The console passphrase prompt no longer waits for the network. The premount
   script configured the network in the foreground, so a machine booted with no
-  network link sat at a blank screen for four to eight minutes while DHCP timed
-  out. The network is now brought up in the background by dropbear's own boot
-  script, and the prompt appears at once.
+  network link sat at a blank screen while DHCP timed out: four and a half to
+  five minutes depending on the distribution, and up to three minutes more when
+  no network device existed. The network is now brought up in the background by
+  dropbear's own boot script, and the prompt appears without waiting for it.
 - A network link that comes up late in boot still gives remote unlock.
   initramfs-tools stops trying DHCP after four and a half to five minutes, so
   the premount script now keeps retrying in the background until a network comes
   up, and init-bottom stops the retry when the disk is unlocked at the console.
+  In testing with the link restored seven minutes into boot, remote unlock
+  became available about five minutes after that, because by then the node waits
+  up to five minutes between attempts to reach its peers.
 
 ### Changed
 
@@ -84,9 +92,10 @@ The machine dials out to its bootstrap peers and needs no inbound reachability.
   that was used is recorded at `/usr/share/fips-initramfs/fips-version`.
 - `debian/fips-tag` pins the FIPS release a tagged build bundles. It is part of
   the commit that gets tagged; an ordinary build takes the latest release.
-- A FIPS version floor of 0.5.0, enforced by `debian/fetch-fips-deb.sh`, which
-  is where `fipsctl address` first shipped. `postinst` cannot compute the
-  address it writes into `DROPBEAR_OPTIONS` without it.
+- A FIPS version floor of 0.5.1, enforced by `debian/fetch-fips-deb.sh`.
+  `fipsctl address`, which `postinst` needs to compute the address it writes
+  into `DROPBEAR_OPTIONS`, first shipped in 0.5.0, and 0.5.1 is the first
+  release whose daemon runs on Debian 12 and Ubuntu 22.04.
 - `FIPS_DEB` names a local `.deb` instead of downloading one, for an offline
   build or to test a release candidate.
 - A debconf prompt for the SSH public key allowed to unlock the machine, written
