@@ -181,13 +181,13 @@ the `BUILD-INFO.txt` attached alongside the `.deb`.
 ### Checking a build against the released file
 
 **A build from a clean checkout of a tag reproduces the file published
-for that tag.** Measured for v0.1.0: a fresh clone checked out at
-`v0.1.0` and built with the container recipe above produced the same
-sha256 as the `.deb` attached to the release. So a package you built
+for that tag.** Measured for v0.1.0 and again for v0.1.1: a fresh clone
+checked out at the tagged commit and built with the container recipe
+above produced the same sha256 as the `.deb` attached to the release. So a package you built
 yourself can be checked against the `SHA256SUMS` on the release page:
 
 ```bash
-sha256sum fips-initramfs_0.1.0_amd64.deb   # compare with SHA256SUMS
+sha256sum fips-initramfs_0.1.1_amd64.deb   # compare with SHA256SUMS
 ```
 
 Build from a modified working tree and it will not match, which is the

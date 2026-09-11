@@ -1,3 +1,9 @@
+fips-initramfs (0.1.2) UNRELEASED; urgency=medium
+
+  * Nothing yet.
+
+ -- Johnathan Corgan <johnathan@corganlabs.com>  Fri, 11 Sep 2026 21:55:00 +0000
+
 fips-initramfs (0.1.1) unstable; urgency=medium
 
   * The init-premount script a_fips no longer calls configure_networking
